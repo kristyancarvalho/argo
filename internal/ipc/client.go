@@ -95,6 +95,15 @@ func (client *Client) Show(ctx context.Context, id string) (Download, error) {
 	return response, nil
 }
 
+func (client *Client) Profile(ctx context.Context, name string) (ProfileResponse, error) {
+	var response ProfileResponse
+	if err := client.Call(ctx, OperationProfile, ProfileRequest{Name: name}, &response); err != nil {
+		return ProfileResponse{}, err
+	}
+
+	return response, nil
+}
+
 func (client *Client) downloadAction(
 	ctx context.Context,
 	operation Operation,

@@ -21,6 +21,22 @@ type controlledDownloadEngine struct {
 	started       chan model.Download
 	active        int
 	maximumActive int
+	rateLimit     int64
+}
+
+func (engine *controlledDownloadEngine) SetRateLimit(bytesPerSecond int64) error {
+	engine.mutex.Lock()
+	defer engine.mutex.Unlock()
+	engine.rateLimit = bytesPerSecond
+
+	return nil
+}
+
+func (engine *controlledDownloadEngine) currentRateLimit() int64 {
+	engine.mutex.Lock()
+	defer engine.mutex.Unlock()
+
+	return engine.rateLimit
 }
 
 func TestConcurrentSchedulerPreservesQueueOrderAndStartsNext(t *testing.T) {
@@ -155,6 +171,29 @@ func TestConcurrentSchedulerRejectsInvalidPriority(t *testing.T) {
 		t.Fatalf("invalid priority returned %T, expected InvalidPriorityError", err)
 	}
 	engine.release("invalid")
+}
+
+func TestConcurrentSchedulerUsesConfiguredDefaultPriority(t *testing.T) {
+	store := openTestStore(t)
+	engine := newControlledDownloadEngine(store, "configured")
+	service, err := daemon.NewServiceWithOptions(context.Background(), store, engine, daemon.ServiceOptions{
+		MaximumConcurrentDownloads: 1,
+		DefaultPriority:            model.PriorityHigh,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeSchedulerService(t, service)
+	identifier := addScheduledDownload(t, service, "configured")
+	assertStartedDownload(t, engine, identifier)
+	download, err := store.Download(context.Background(), identifier)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if download.Priority != model.PriorityHigh {
+		t.Fatalf("download priority is %s, expected high", download.Priority)
+	}
+	engine.release("configured")
 }
 
 func (engine *controlledDownloadEngine) Download(ctx context.Context, download model.Download) error {

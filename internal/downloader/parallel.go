@@ -78,7 +78,7 @@ func (engine *Engine) downloadParallel(
 		}
 	}
 	results := make(chan error, pending)
-	limiter := newRateLimiter(engine.rateLimit)
+	limiter := newRateLimiter(engine.rateLimit.Load)
 	tracker := newProgressTracker(engine, download.ID, states)
 	for _, chunk := range chunks {
 		downloaded := states[chunk.Index].DownloadedBytes

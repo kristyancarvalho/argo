@@ -19,6 +19,7 @@ const (
 	OperationPriority Operation = "priority"
 	OperationList     Operation = "list"
 	OperationShow     Operation = "show"
+	OperationProfile  Operation = "profile"
 )
 
 type Request struct {
@@ -74,6 +75,20 @@ type PriorityResponse struct {
 
 type ShowRequest struct {
 	ID string `json:"id"`
+}
+
+type ProfileRequest struct {
+	Name string `json:"name"`
+}
+
+type ProfileResponse struct {
+	Name                   string `json:"name"`
+	BytesPerSecond         int64  `json:"bytes_per_second"`
+	DefaultPriority        string `json:"default_priority"`
+	MaxConcurrentDownloads int    `json:"max_concurrent_downloads"`
+	PauseOnMetered         bool   `json:"pause_on_metered"`
+	ResumeAfterMetered     bool   `json:"resume_after_metered"`
+	Policy                 string `json:"policy"`
 }
 
 type Download struct {

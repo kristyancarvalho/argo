@@ -48,14 +48,29 @@ func TestCLIBasicDownloadFlow(t *testing.T) {
 
 	runtimeDirectory := filepath.Join(temporaryDirectory, "runtime")
 	dataDirectory := filepath.Join(temporaryDirectory, "data")
+	configDirectory := filepath.Join(temporaryDirectory, "config")
 	destination := filepath.Join(temporaryDirectory, "downloads")
 	if err := os.MkdirAll(destination, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(configDirectory, "argo"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	profileConfig := []byte(`[profiles.gaming]
+download_limit = "0"
+default_priority = "high"
+max_concurrent_downloads = 2
+pause_on_metered = true
+resume_after_metered = true
+`)
+	if err := os.WriteFile(filepath.Join(configDirectory, "argo", "config.toml"), profileConfig, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	environment := append(
 		os.Environ(),
 		"XDG_RUNTIME_DIR="+runtimeDirectory,
 		"XDG_DATA_HOME="+dataDirectory,
+		"XDG_CONFIG_HOME="+configDirectory,
 	)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -82,6 +97,17 @@ func TestCLIBasicDownloadFlow(t *testing.T) {
 			t.Fatalf("daemon did not become ready: %s", daemonError.String())
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+	profileOutput, err := executeCLI(ctx, argoBinary, destination, environment, "profile", "gaming")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(profileOutput, "Active profile: gaming") {
+		t.Fatalf("unexpected profile output %q", profileOutput)
+	}
+	unknownOutput, err := executeCLI(ctx, argoBinary, destination, environment, "profile", "missing")
+	if err == nil || !strings.Contains(unknownOutput, "unknown profile") {
+		t.Fatalf("unknown profile returned %v: %q", err, unknownOutput)
 	}
 
 	addOutput, err := executeCLI(

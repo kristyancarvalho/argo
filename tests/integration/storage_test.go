@@ -29,8 +29,8 @@ func TestFreshDatabaseCreation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if version != 4 {
-		t.Fatalf("schema version is %d, expected 4", version)
+	if version != 5 {
+		t.Fatalf("schema version is %d, expected 5", version)
 	}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -89,8 +89,8 @@ func TestDatabaseMigration(t *testing.T) {
 	if err := database.QueryRow("SELECT MAX(version) FROM schema_migrations").Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 4 {
-		t.Fatalf("schema version is %d, expected 4", version)
+	if version != 5 {
+		t.Fatalf("schema version is %d, expected 5", version)
 	}
 	var indexName string
 	if err := database.QueryRow(
@@ -98,6 +98,40 @@ func TestDatabaseMigration(t *testing.T) {
 		"downloads_status_priority_created_idx",
 	).Scan(&indexName); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPersistActiveProfile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "argo.db")
+	store := openStoreAt(t, path)
+	active, err := store.ActiveProfile(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active != "" {
+		t.Fatalf("fresh active profile is %q", active)
+	}
+	if err := store.SetActiveProfile(context.Background(), "gaming"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := storage.Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := reopened.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	active, err = reopened.ActiveProfile(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active != "gaming" {
+		t.Fatalf("persisted active profile is %q", active)
 	}
 }
 

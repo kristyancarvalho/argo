@@ -78,7 +78,40 @@ func (client *cliClient) Status(context.Context) (ipc.Status, error) {
 		PID:             42,
 		StartedAt:       time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC),
 		ProtocolVersion: ipc.ProtocolVersion,
+		Network: ipc.NetworkStatus{
+			Available:      true,
+			Connected:      true,
+			State:          "connected-global",
+			ConnectionType: "802-11-wireless",
+			Interface:      "wlan0",
+			Metered:        "no",
+		},
+		ActiveProfile: "gaming",
 	}, nil
+}
+
+func TestCLIStatusShowsNetworkAndProfile(t *testing.T) {
+	client := &cliClient{}
+	var output bytes.Buffer
+	if err := cli.Run(context.Background(), client, &output, []string{"status"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []string{
+		"Network: connected-global",
+		"Interface: wlan0",
+		"Connection type: 802-11-wireless",
+		"Metered: no",
+		"Active profile: gaming",
+	} {
+		if !strings.Contains(output.String(), value) {
+			t.Fatalf("status output %q does not contain %q", output.String(), value)
+		}
+	}
+}
+
+func (client *cliClient) Profile(_ context.Context, name string) (ipc.ProfileResponse, error) {
+	client.called = "profile:" + name
+	return ipc.ProfileResponse{Name: name}, nil
 }
 
 func TestCLICommands(t *testing.T) {
@@ -96,6 +129,7 @@ func TestCLICommands(t *testing.T) {
 		{"cancel", []string{"cancel", "download-id"}, "cancel:download-id", "download-id: canceled"},
 		{"priority", []string{"priority", "download-id", "high"}, "priority:download-id:high", "download-id: high"},
 		{"status", []string{"status"}, "status", "Daemon: running"},
+		{"profile", []string{"profile", "gaming"}, "profile:gaming", "Active profile: gaming"},
 	}
 
 	for _, test := range tests {
@@ -131,6 +165,8 @@ func TestCLIRejectsInvalidArguments(t *testing.T) {
 		{"priority", "download-id", "high", "extra"},
 		{"watch", "extra"},
 		{"status", "extra"},
+		{"profile"},
+		{"profile", "one", "two"},
 	}
 
 	for _, arguments := range tests {

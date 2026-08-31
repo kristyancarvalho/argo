@@ -7,28 +7,35 @@ import (
 )
 
 type rateLimiter struct {
-	mutex          sync.Mutex
-	bytesPerSecond int64
-	startedAt      time.Time
-	totalBytes     int64
+	mutex       sync.Mutex
+	rate        func() int64
+	currentRate int64
+	startedAt   time.Time
+	totalBytes  int64
 }
 
-func newRateLimiter(bytesPerSecond int64) *rateLimiter {
+func newRateLimiter(rate func() int64) *rateLimiter {
 	return &rateLimiter{
-		bytesPerSecond: bytesPerSecond,
-		startedAt:      time.Now(),
+		rate:      rate,
+		startedAt: time.Now(),
 	}
 }
 
 func (limiter *rateLimiter) Wait(ctx context.Context, byteCount int) error {
 	limiter.mutex.Lock()
 	defer limiter.mutex.Unlock()
-	if limiter.bytesPerSecond <= 0 || byteCount <= 0 {
+	bytesPerSecond := limiter.rate()
+	if bytesPerSecond != limiter.currentRate {
+		limiter.currentRate = bytesPerSecond
+		limiter.startedAt = time.Now()
+		limiter.totalBytes = 0
+	}
+	if bytesPerSecond <= 0 || byteCount <= 0 {
 		return nil
 	}
 	limiter.totalBytes += int64(byteCount)
 	expected := time.Duration(
-		float64(limiter.totalBytes) / float64(limiter.bytesPerSecond) * float64(time.Second),
+		float64(limiter.totalBytes) / float64(bytesPerSecond) * float64(time.Second),
 	)
 	delay := time.Until(limiter.startedAt.Add(expected))
 	if delay <= 0 {

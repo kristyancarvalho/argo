@@ -18,6 +18,7 @@ type Client interface {
 	Cancel(context.Context, string) (ipc.DownloadActionResponse, error)
 	Priority(context.Context, string, string) (ipc.PriorityResponse, error)
 	Status(context.Context) (ipc.Status, error)
+	Profile(context.Context, string) (ipc.ProfileResponse, error)
 }
 
 func Run(ctx context.Context, client Client, output io.Writer, arguments []string) error {
@@ -46,9 +47,24 @@ func Run(ctx context.Context, client Client, output io.Writer, arguments []strin
 		return runWatch(ctx, client, output, operands)
 	case "status":
 		return runStatus(ctx, client, output, operands)
+	case "profile":
+		return runProfile(ctx, client, output, operands)
 	default:
 		return UsageError{Message: fmt.Sprintf("unknown command %q", command)}
 	}
+}
+
+func runProfile(ctx context.Context, client Client, output io.Writer, arguments []string) error {
+	if len(arguments) != 1 {
+		return UsageError{Message: "argo profile <name>"}
+	}
+	profile, err := client.Profile(ctx, arguments[0])
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(output, "Active profile: %s\n", profile.Name)
+
+	return err
 }
 
 func runAdd(ctx context.Context, client Client, output io.Writer, arguments []string) error {
@@ -166,16 +182,35 @@ func runStatus(ctx context.Context, client Client, output io.Writer, arguments [
 	if err != nil {
 		return err
 	}
+	networkState := status.Network.State
+	if !status.Network.Available {
+		networkState = "unavailable"
+	} else if networkState == "" {
+		networkState = "unknown"
+	}
 	_, err = fmt.Fprintf(
 		output,
-		"Daemon: %s\nPID: %d\nStarted: %s\nProtocol: %d\n",
+		"Daemon: %s\nPID: %d\nStarted: %s\nProtocol: %d\nNetwork: %s\nInterface: %s\nConnection type: %s\nMetered: %s\nActive profile: %s\n",
 		status.State,
 		status.PID,
 		status.StartedAt.Format("2006-01-02 15:04:05Z07:00"),
 		status.ProtocolVersion,
+		networkState,
+		statusValue(status.Network.Interface),
+		statusValue(status.Network.ConnectionType),
+		statusValue(status.Network.Metered),
+		statusValue(status.ActiveProfile),
 	)
 
 	return err
+}
+
+func statusValue(value string) string {
+	if value == "" {
+		return "unknown"
+	}
+
+	return value
 }
 
 func formatProgress(download ipc.Download) string {
