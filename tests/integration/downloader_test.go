@@ -224,6 +224,29 @@ func TestResumeRestartsWhenServerIgnoresRange(t *testing.T) {
 	assertCompletedDownload(t, store, download, payload)
 }
 
+func TestSingleStreamRateLimit(t *testing.T) {
+	payload := make([]byte, 32*1024)
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		_, _ = response.Write(payload)
+	}))
+	defer server.Close()
+
+	store := openTestStore(t)
+	download := persistedDownload(t, store, server.URL+"/limited.bin", t.TempDir(), "limited.bin")
+	startedAt := time.Now()
+	engine := downloader.NewWithRateLimit(store, http.DefaultClient, 64*1024)
+	if err := engine.Download(context.Background(), download); err != nil {
+		t.Fatal(err)
+	}
+	elapsed := time.Since(startedAt)
+	if elapsed < 400*time.Millisecond {
+		t.Fatalf("rate-limited transfer finished too quickly in %s", elapsed)
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("rate-limited transfer exceeded tolerance at %s", elapsed)
+	}
+}
+
 func persistedDownload(
 	t *testing.T,
 	store *storage.Store,

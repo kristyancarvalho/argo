@@ -27,17 +27,23 @@ type Engine struct {
 	httpClient *http.Client
 	store      Store
 	now        func() time.Time
+	rateLimit  int64
 }
 
 func New(store Store) *Engine {
-	return NewWithHTTPClient(store, http.DefaultClient)
+	return NewWithRateLimit(store, http.DefaultClient, 0)
 }
 
 func NewWithHTTPClient(store Store, httpClient *http.Client) *Engine {
+	return NewWithRateLimit(store, httpClient, 0)
+}
+
+func NewWithRateLimit(store Store, httpClient *http.Client, bytesPerSecond int64) *Engine {
 	return &Engine{
 		httpClient: httpClient,
 		store:      store,
 		now:        func() time.Time { return time.Now().UTC() },
+		rateLimit:  bytesPerSecond,
 	}
 }
 
@@ -132,7 +138,14 @@ func (engine *Engine) Download(ctx context.Context, download model.Download) err
 		}
 	}
 
-	downloaded, err := engine.copy(ctx, download.ID, partial, response.Body, offset)
+	downloaded, err := engine.copy(
+		ctx,
+		download.ID,
+		partial,
+		response.Body,
+		offset,
+		newRateLimiter(engine.rateLimit),
+	)
 	if err != nil {
 		return engine.fail(ctx, download.ID, err)
 	}
@@ -278,6 +291,7 @@ func (engine *Engine) copy(
 	destination io.Writer,
 	source io.Reader,
 	downloaded int64,
+	limiter *rateLimiter,
 ) (int64, error) {
 	buffer := make([]byte, copyBufferSize)
 	for {
@@ -286,6 +300,9 @@ func (engine *Engine) copy(
 		}
 		read, readError := source.Read(buffer)
 		if read > 0 {
+			if err := limiter.Wait(ctx, read); err != nil {
+				return downloaded, err
+			}
 			written, writeError := destination.Write(buffer[:read])
 			downloaded += int64(written)
 			if writeError != nil {

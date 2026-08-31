@@ -61,6 +61,28 @@ func (client *Client) Resume(ctx context.Context, id string) (DownloadActionResp
 	return client.downloadAction(ctx, OperationResume, id)
 }
 
+func (client *Client) Cancel(ctx context.Context, id string) (DownloadActionResponse, error) {
+	return client.downloadAction(ctx, OperationCancel, id)
+}
+
+func (client *Client) List(ctx context.Context) ([]Download, error) {
+	var response ListResponse
+	if err := client.Call(ctx, OperationList, nil, &response); err != nil {
+		return nil, err
+	}
+
+	return response.Downloads, nil
+}
+
+func (client *Client) Show(ctx context.Context, id string) (Download, error) {
+	var response Download
+	if err := client.Call(ctx, OperationShow, ShowRequest{ID: id}, &response); err != nil {
+		return Download{}, err
+	}
+
+	return response, nil
+}
+
 func (client *Client) downloadAction(
 	ctx context.Context,
 	operation Operation,
