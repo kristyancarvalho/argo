@@ -14,6 +14,10 @@ func (service *Service) runNetworkObserver() {
 }
 
 func (service *Service) applyNetworkState(snapshot network.Snapshot) error {
+	service.networkMutex.Lock()
+	service.networkSnapshot = snapshot
+	service.networkAvailable = true
+	service.networkMutex.Unlock()
 	pauseOnMetered, _ := service.meteredPolicy()
 	if !pauseOnMetered {
 		return nil

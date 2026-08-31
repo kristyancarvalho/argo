@@ -182,16 +182,35 @@ func runStatus(ctx context.Context, client Client, output io.Writer, arguments [
 	if err != nil {
 		return err
 	}
+	networkState := status.Network.State
+	if !status.Network.Available {
+		networkState = "unavailable"
+	} else if networkState == "" {
+		networkState = "unknown"
+	}
 	_, err = fmt.Fprintf(
 		output,
-		"Daemon: %s\nPID: %d\nStarted: %s\nProtocol: %d\n",
+		"Daemon: %s\nPID: %d\nStarted: %s\nProtocol: %d\nNetwork: %s\nInterface: %s\nConnection type: %s\nMetered: %s\nActive profile: %s\n",
 		status.State,
 		status.PID,
 		status.StartedAt.Format("2006-01-02 15:04:05Z07:00"),
 		status.ProtocolVersion,
+		networkState,
+		statusValue(status.Network.Interface),
+		statusValue(status.Network.ConnectionType),
+		statusValue(status.Network.Metered),
+		statusValue(status.ActiveProfile),
 	)
 
 	return err
+}
+
+func statusValue(value string) string {
+	if value == "" {
+		return "unknown"
+	}
+
+	return value
 }
 
 func formatProgress(download ipc.Download) string {

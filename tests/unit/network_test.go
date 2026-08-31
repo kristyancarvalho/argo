@@ -86,6 +86,12 @@ func TestNetworkManagerActiveConnectionAndInterfaceResolution(t *testing.T) {
 		destination:   argonetwork.NetworkManagerDestination,
 		path:          activePath,
 		interfaceName: argonetwork.ActiveConnectionInterface,
+		property:      "Type",
+	}] = "802-11-wireless"
+	reader.values[propertyKey{
+		destination:   argonetwork.NetworkManagerDestination,
+		path:          activePath,
+		interfaceName: argonetwork.ActiveConnectionInterface,
 		property:      "Devices",
 	}] = []string{firstDevice, secondDevice}
 	reader.values[propertyKey{
@@ -111,6 +117,7 @@ func TestNetworkManagerActiveConnectionAndInterfaceResolution(t *testing.T) {
 		snapshot.Metered != argonetwork.MeteredGuessYes ||
 		!snapshot.Metered.IsMetered() ||
 		snapshot.ActiveConnection != "Office Wi-Fi" ||
+		snapshot.ConnectionType != "802-11-wireless" ||
 		snapshot.Interface != "wlan0" {
 		t.Fatalf("unexpected active network state: %+v", snapshot)
 	}
@@ -150,6 +157,30 @@ func TestNetworkManagerMissingMeteredStateIsUnknown(t *testing.T) {
 	}
 	if snapshot.Metered != argonetwork.MeteredUnknown || snapshot.Metered.IsMetered() {
 		t.Fatalf("missing metered property produced %q", snapshot.Metered)
+	}
+}
+
+func TestNetworkManagerMissingConnectionTypeIsPreserved(t *testing.T) {
+	activePath := "/org/freedesktop/NetworkManager/ActiveConnection/9"
+	reader := managerPropertyReader(uint32(70), uint32(4), activePath)
+	reader.values[propertyKey{
+		destination:   argonetwork.NetworkManagerDestination,
+		path:          activePath,
+		interfaceName: argonetwork.ActiveConnectionInterface,
+		property:      "Id",
+	}] = "VPN"
+	reader.values[propertyKey{
+		destination:   argonetwork.NetworkManagerDestination,
+		path:          activePath,
+		interfaceName: argonetwork.ActiveConnectionInterface,
+		property:      "Devices",
+	}] = []string{}
+	snapshot, err := argonetwork.NewClient(reader).ReadState(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.ActiveConnection != "VPN" || snapshot.ConnectionType != "" || snapshot.Interface != "" {
+		t.Fatalf("unexpected optional network data: %+v", snapshot)
 	}
 }
 

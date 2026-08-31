@@ -78,7 +78,35 @@ func (client *cliClient) Status(context.Context) (ipc.Status, error) {
 		PID:             42,
 		StartedAt:       time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC),
 		ProtocolVersion: ipc.ProtocolVersion,
+		Network: ipc.NetworkStatus{
+			Available:      true,
+			Connected:      true,
+			State:          "connected-global",
+			ConnectionType: "802-11-wireless",
+			Interface:      "wlan0",
+			Metered:        "no",
+		},
+		ActiveProfile: "gaming",
 	}, nil
+}
+
+func TestCLIStatusShowsNetworkAndProfile(t *testing.T) {
+	client := &cliClient{}
+	var output bytes.Buffer
+	if err := cli.Run(context.Background(), client, &output, []string{"status"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []string{
+		"Network: connected-global",
+		"Interface: wlan0",
+		"Connection type: 802-11-wireless",
+		"Metered: no",
+		"Active profile: gaming",
+	} {
+		if !strings.Contains(output.String(), value) {
+			t.Fatalf("status output %q does not contain %q", output.String(), value)
+		}
+	}
 }
 
 func (client *cliClient) Profile(_ context.Context, name string) (ipc.ProfileResponse, error) {
