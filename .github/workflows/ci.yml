@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - dev
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify formatting
+        run: test -z "$(gofmt -l .)"
+      - name: Vet
+        run: go vet ./...
+      - name: Lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.13.2
+      - name: Unit tests
+        run: go test ./tests/unit/...
+      - name: Integration tests
+        run: go test ./tests/integration/...
+      - name: End-to-end tests
+        run: go test ./tests/e2e/...
+      - name: Race tests
+        run: go test -race ./...
+      - name: Build executables
+        run: go build ./cmd/argo ./cmd/argod

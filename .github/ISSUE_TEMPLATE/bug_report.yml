@@ -1,0 +1,57 @@
+name: Bug report
+description: Report reproducible incorrect behavior
+title: ""
+labels:
+  - type:bug
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Argo version
+    validations:
+      required: true
+  - type: input
+    id: distribution
+    attributes:
+      label: Distribution
+    validations:
+      required: true
+  - type: input
+    id: kernel
+    attributes:
+      label: Kernel
+    validations:
+      required: true
+  - type: input
+    id: networkmanager
+    attributes:
+      label: NetworkManager version
+  - type: input
+    id: command
+    attributes:
+      label: Command
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      render: shell
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true
