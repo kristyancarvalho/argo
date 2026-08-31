@@ -142,25 +142,42 @@ func rangeFixtureServer(t *testing.T, payload []byte) (*httptest.Server, *atomic
 	var rangeRequests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		offset := int64(0)
+		lastByte := int64(len(payload) - 1)
 		if rangeHeader := request.Header.Get("Range"); rangeHeader != "" {
-			if !strings.HasPrefix(rangeHeader, "bytes=") || !strings.HasSuffix(rangeHeader, "-") {
+			if !strings.HasPrefix(rangeHeader, "bytes=") {
 				http.Error(response, "invalid range", http.StatusRequestedRangeNotSatisfiable)
 				return
 			}
-			parsedOffset, err := strconv.ParseInt(strings.TrimSuffix(strings.TrimPrefix(rangeHeader, "bytes="), "-"), 10, 64)
+			bounds := strings.Split(strings.TrimPrefix(rangeHeader, "bytes="), "-")
+			if len(bounds) != 2 {
+				http.Error(response, "invalid range", http.StatusRequestedRangeNotSatisfiable)
+				return
+			}
+			parsedOffset, err := strconv.ParseInt(bounds[0], 10, 64)
 			if err != nil || parsedOffset < 0 || parsedOffset >= int64(len(payload)) {
 				http.Error(response, "invalid range", http.StatusRequestedRangeNotSatisfiable)
 				return
 			}
 			offset = parsedOffset
-			rangeRequests.Add(1)
-			response.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", offset, len(payload)-1, len(payload)))
+			if bounds[1] != "" {
+				lastByte, err = strconv.ParseInt(bounds[1], 10, 64)
+				if err != nil || lastByte < offset || lastByte >= int64(len(payload)) {
+					http.Error(response, "invalid range", http.StatusRequestedRangeNotSatisfiable)
+					return
+				}
+			}
+			if offset > 0 {
+				rangeRequests.Add(1)
+			}
+			response.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", offset, lastByte, len(payload)))
+			response.Header().Set("Content-Length", strconv.FormatInt(lastByte-offset+1, 10))
 			response.WriteHeader(http.StatusPartialContent)
+		} else {
+			response.Header().Set("Content-Length", strconv.Itoa(len(payload)))
 		}
-		response.Header().Set("Content-Length", strconv.FormatInt(int64(len(payload))-offset, 10))
 		flusher, _ := response.(http.Flusher)
-		for position := offset; position < int64(len(payload)); position += 4096 {
-			end := min(position+4096, int64(len(payload)))
+		for position := offset; position <= lastByte; position += 4096 {
+			end := min(position+4096, lastByte+1)
 			if _, err := response.Write(payload[position:end]); err != nil {
 				return
 			}

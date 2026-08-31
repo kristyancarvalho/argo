@@ -29,8 +29,8 @@ func TestFreshDatabaseCreation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if version != 2 {
-		t.Fatalf("schema version is %d, expected 2", version)
+	if version != 3 {
+		t.Fatalf("schema version is %d, expected 3", version)
 	}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -89,8 +89,8 @@ func TestDatabaseMigration(t *testing.T) {
 	if err := database.QueryRow("SELECT MAX(version) FROM schema_migrations").Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 2 {
-		t.Fatalf("schema version is %d, expected 2", version)
+	if version != 3 {
+		t.Fatalf("schema version is %d, expected 3", version)
 	}
 	var indexName string
 	if err := database.QueryRow(
@@ -247,6 +247,7 @@ func testDownload(t *testing.T, createdAt time.Time) model.Download {
 		UpdatedAt:       createdAt,
 		ETag:            `"fixture-v1"`,
 		LastModified:    "Sun, 31 Aug 2026 12:00:00 GMT",
+		RangeSupported:  true,
 	}
 }
 
@@ -266,6 +267,7 @@ func assertDownloadEqual(t *testing.T, actual, expected model.Download) {
 		!actual.CompletedAt.Equal(expected.CompletedAt) ||
 		actual.ETag != expected.ETag ||
 		actual.LastModified != expected.LastModified ||
+		actual.RangeSupported != expected.RangeSupported ||
 		actual.Error != expected.Error {
 		t.Fatalf("downloads differ:\nactual:   %+v\nexpected: %+v", actual, expected)
 	}

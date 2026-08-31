@@ -151,5 +151,6 @@ type Download struct {
 	CompletedAt     time.Time
 	ETag            string
 	LastModified    string
+	RangeSupported  bool
 	Error           string
 }

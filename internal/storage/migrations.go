@@ -47,6 +47,14 @@ var migrations = []migration{
              ON downloads (status, priority, created_at, id)`,
 		},
 	},
+	{
+		version: 3,
+		statements: []string{
+			`ALTER TABLE downloads
+             ADD COLUMN range_supported INTEGER NOT NULL DEFAULT 0
+             CHECK (range_supported IN (0, 1))`,
+		},
+	},
 }
 
 func migrate(ctx context.Context, database *sql.DB) error {
