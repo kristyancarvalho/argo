@@ -56,6 +56,7 @@ func TestCLIBasicDownloadFlow(t *testing.T) {
 		os.Environ(),
 		"XDG_RUNTIME_DIR="+runtimeDirectory,
 		"XDG_DATA_HOME="+dataDirectory,
+		"XDG_CONFIG_HOME="+filepath.Join(temporaryDirectory, "config"),
 	)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

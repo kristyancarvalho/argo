@@ -31,6 +31,7 @@ func TestDaemonExecutableLifecycle(t *testing.T) {
 	command := exec.CommandContext(ctx, binary)
 	command.Env = append(
 		os.Environ(),
+		"XDG_CONFIG_HOME="+filepath.Join(temporaryDirectory, "config"),
 		"XDG_RUNTIME_DIR="+temporaryDirectory,
 		"XDG_DATA_HOME="+filepath.Join(temporaryDirectory, "data"),
 	)

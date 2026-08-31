@@ -157,6 +157,29 @@ func TestConcurrentSchedulerRejectsInvalidPriority(t *testing.T) {
 	engine.release("invalid")
 }
 
+func TestConcurrentSchedulerUsesConfiguredDefaultPriority(t *testing.T) {
+	store := openTestStore(t)
+	engine := newControlledDownloadEngine(store, "configured")
+	service, err := daemon.NewServiceWithOptions(context.Background(), store, engine, daemon.ServiceOptions{
+		MaximumConcurrentDownloads: 1,
+		DefaultPriority:            model.PriorityHigh,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeSchedulerService(t, service)
+	identifier := addScheduledDownload(t, service, "configured")
+	assertStartedDownload(t, engine, identifier)
+	download, err := store.Download(context.Background(), identifier)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if download.Priority != model.PriorityHigh {
+		t.Fatalf("download priority is %s, expected high", download.Priority)
+	}
+	engine.release("configured")
+}
+
 func (engine *controlledDownloadEngine) Download(ctx context.Context, download model.Download) error {
 	if download.Status == model.StatusQueued {
 		if err := engine.store.UpdateDownloadStatus(

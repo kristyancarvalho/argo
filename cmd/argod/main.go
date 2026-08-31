@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/kristyancarvalho/argo/internal/config"
 	"github.com/kristyancarvalho/argo/internal/daemon"
 	"github.com/kristyancarvalho/argo/internal/downloader"
 	"github.com/kristyancarvalho/argo/internal/ipc"
@@ -26,13 +27,31 @@ func main() {
 }
 
 func run(arguments []string) (runError error) {
+	configuration, err := config.LoadDefault()
+	if err != nil {
+		return err
+	}
 	flags := flag.NewFlagSet("argod", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	rateLimit := flags.Int64("rate-limit", 0, "maximum download bytes per second")
-	pauseOnMetered := flags.Bool("pause-on-metered", false, "pause downloads on metered connections")
+	maximumConcurrent := flags.Int(
+		"max-concurrent-downloads",
+		configuration.Download.MaxConcurrentDownloads,
+		"maximum concurrent downloads",
+	)
+	maximumChunks := flags.Int(
+		"max-chunks-per-download",
+		configuration.Download.MaxChunksPerDownload,
+		"maximum chunks per download",
+	)
+	pauseOnMetered := flags.Bool(
+		"pause-on-metered",
+		configuration.Network.PauseOnMetered,
+		"pause downloads on metered connections",
+	)
 	resumeAfterMetered := flags.Bool(
 		"resume-after-metered",
-		false,
+		configuration.Network.ResumeAfterMetered,
 		"resume automatically paused downloads on unmetered connections",
 	)
 	if err := flags.Parse(arguments); err != nil {
@@ -43,6 +62,12 @@ func run(arguments []string) (runError error) {
 	}
 	if *rateLimit < 0 {
 		return fmt.Errorf("rate limit must not be negative")
+	}
+	if *maximumConcurrent <= 0 {
+		return fmt.Errorf("maximum concurrent downloads must be positive")
+	}
+	if *maximumChunks <= 0 {
+		return fmt.Errorf("maximum chunks per download must be positive")
 	}
 	if *resumeAfterMetered && !*pauseOnMetered {
 		return fmt.Errorf("resume after metered requires pause on metered")
@@ -66,7 +91,14 @@ func run(arguments []string) (runError error) {
 	defer func() {
 		runError = errors.Join(runError, store.Close())
 	}()
-	engine := downloader.NewWithRateLimit(store, http.DefaultClient, *rateLimit)
+	engine, err := downloader.NewWithOptions(store, downloader.Options{
+		HTTPClient:     http.DefaultClient,
+		BytesPerSecond: *rateLimit,
+		MaximumChunks:  *maximumChunks,
+	})
+	if err != nil {
+		return err
+	}
 	var networkObserver daemon.NetworkObserver
 	networkClient, networkError := network.ConnectSystem()
 	if networkError == nil {
@@ -76,9 +108,11 @@ func run(arguments []string) (runError error) {
 		}()
 	}
 	service, err := daemon.NewServiceWithOptions(ctx, store, engine, daemon.ServiceOptions{
-		NetworkObserver:    networkObserver,
-		PauseOnMetered:     *pauseOnMetered,
-		ResumeAfterMetered: *resumeAfterMetered,
+		MaximumConcurrentDownloads: *maximumConcurrent,
+		NetworkObserver:            networkObserver,
+		PauseOnMetered:             *pauseOnMetered,
+		ResumeAfterMetered:         *resumeAfterMetered,
+		DefaultPriority:            configuration.Download.DefaultPriority,
 	})
 	if err != nil {
 		return err
