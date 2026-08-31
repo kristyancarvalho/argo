@@ -2,10 +2,12 @@ package downloader
 
 import (
 	"context"
+	"sync"
 	"time"
 )
 
 type rateLimiter struct {
+	mutex          sync.Mutex
 	bytesPerSecond int64
 	startedAt      time.Time
 	totalBytes     int64
@@ -19,6 +21,8 @@ func newRateLimiter(bytesPerSecond int64) *rateLimiter {
 }
 
 func (limiter *rateLimiter) Wait(ctx context.Context, byteCount int) error {
+	limiter.mutex.Lock()
+	defer limiter.mutex.Unlock()
 	if limiter.bytesPerSecond <= 0 || byteCount <= 0 {
 		return nil
 	}

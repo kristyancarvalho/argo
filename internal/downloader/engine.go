@@ -28,6 +28,17 @@ type Engine struct {
 	store      Store
 	now        func() time.Time
 	rateLimit  int64
+	planner    ChunkPlanner
+	chunkCount int
+	observer   func(model.DownloadID, ChunkProgress)
+}
+
+type Options struct {
+	HTTPClient       *http.Client
+	BytesPerSecond   int64
+	MaximumChunks    int
+	MinimumChunkSize int64
+	ChunkProgress    func(model.DownloadID, ChunkProgress)
 }
 
 func New(store Store) *Engine {
@@ -39,12 +50,41 @@ func NewWithHTTPClient(store Store, httpClient *http.Client) *Engine {
 }
 
 func NewWithRateLimit(store Store, httpClient *http.Client, bytesPerSecond int64) *Engine {
+	engine, _ := NewWithOptions(store, Options{
+		HTTPClient:     httpClient,
+		BytesPerSecond: bytesPerSecond,
+	})
+
+	return engine
+}
+
+func NewWithOptions(store Store, options Options) (*Engine, error) {
+	if options.HTTPClient == nil {
+		options.HTTPClient = http.DefaultClient
+	}
+	if options.MaximumChunks == 0 {
+		options.MaximumChunks = DefaultMaximumChunks
+	}
+	if options.MinimumChunkSize == 0 {
+		options.MinimumChunkSize = DefaultMinimumChunkSize
+	}
+	if options.BytesPerSecond < 0 {
+		return nil, fmt.Errorf("download rate limit must not be negative")
+	}
+	planner, err := NewChunkPlanner(options.MaximumChunks, options.MinimumChunkSize)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Engine{
-		httpClient: httpClient,
+		httpClient: options.HTTPClient,
 		store:      store,
 		now:        func() time.Time { return time.Now().UTC() },
-		rateLimit:  bytesPerSecond,
-	}
+		rateLimit:  options.BytesPerSecond,
+		planner:    planner,
+		chunkCount: options.MaximumChunks,
+		observer:   options.ChunkProgress,
+	}, nil
 }
 
 func (engine *Engine) Download(ctx context.Context, download model.Download) error {
@@ -83,6 +123,15 @@ func (engine *Engine) Download(ctx context.Context, download model.Download) err
 		engine.now(),
 	); err != nil {
 		return engine.fail(ctx, download.ID, err)
+	}
+	if metadata.RangeSupported && metadata.TotalSize > 0 {
+		chunks, err := engine.planner.Plan(metadata.TotalSize, engine.chunkCount)
+		if err != nil {
+			return engine.fail(ctx, download.ID, err)
+		}
+		if len(chunks) > 1 {
+			return engine.downloadParallel(ctx, download, metadata, chunks, resolving)
+		}
 	}
 
 	offset, finalPath, err := engine.preparePaths(download)
