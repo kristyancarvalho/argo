@@ -1,0 +1,33 @@
+[Unit]
+Description=Argo QoS helper for %i
+Documentation=https://github.com/kristyancarvalho/argo
+After=network-pre.target
+Before=network.target
+
+[Service]
+Type=exec
+User=%i
+ExecStart=/usr/bin/argo-qosd
+RuntimeDirectory=argo
+RuntimeDirectoryMode=0700
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=15s
+KillSignal=SIGTERM
+CapabilityBoundingSet=CAP_NET_ADMIN
+AmbientCapabilities=CAP_NET_ADMIN
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+SystemCallArchitectures=native
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
