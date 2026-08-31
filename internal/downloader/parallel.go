@@ -35,7 +35,7 @@ func (engine *Engine) downloadParallel(
 	chunks []Chunk,
 	resolving bool,
 ) error {
-	partial, finalPath, err := prepareParallelFile(download, metadata.TotalSize)
+	partial, finalPath, originalSize, err := prepareParallelFile(download, metadata.TotalSize)
 	if err != nil {
 		return engine.fail(ctx, download.ID, err)
 	}
@@ -45,10 +45,17 @@ func (engine *Engine) downloadParallel(
 			_ = partial.Close()
 		}
 	}()
-	if download.DownloadedBytes != 0 {
-		if err := engine.store.UpdateDownloadProgress(ctx, download.ID, 0, engine.now()); err != nil {
-			return engine.fail(ctx, download.ID, err)
-		}
+
+	states, err := engine.store.DownloadChunks(ctx, download.ID)
+	if err != nil {
+		return engine.fail(ctx, download.ID, err)
+	}
+	if !chunkStatesMatch(states, chunks) {
+		states = plannedChunkStates(download.ID, chunks)
+	}
+	adjustChunkStatesForSize(states, originalSize)
+	if err := engine.store.ReplaceDownloadChunks(ctx, download.ID, states, engine.now()); err != nil {
+		return engine.fail(ctx, download.ID, err)
 	}
 	if resolving {
 		if err := engine.store.UpdateDownloadStatus(
@@ -64,29 +71,36 @@ func (engine *Engine) downloadParallel(
 
 	workerContext, cancelWorkers := context.WithCancel(ctx)
 	defer cancelWorkers()
-	results := make(chan error, len(chunks))
-	limiter := newRateLimiter(engine.rateLimit)
-	tracker := &progressTracker{
-		byChunk:    make([]int64, len(chunks)),
-		downloadID: download.ID,
-		engine:     engine,
+	pending := 0
+	for _, state := range states {
+		if state.DownloadedBytes < state.Size() {
+			pending++
+		}
 	}
+	results := make(chan error, pending)
+	limiter := newRateLimiter(engine.rateLimit)
+	tracker := newProgressTracker(engine, download.ID, states)
 	for _, chunk := range chunks {
-		go func(chunk Chunk) {
+		downloaded := states[chunk.Index].DownloadedBytes
+		if downloaded == chunk.Size() {
+			continue
+		}
+		go func(chunk Chunk, downloaded int64) {
 			results <- engine.downloadChunk(
 				workerContext,
 				download,
 				metadata.TotalSize,
 				partial,
 				chunk,
+				downloaded,
 				limiter,
 				tracker,
 			)
-		}(chunk)
+		}(chunk, downloaded)
 	}
 
 	workerErrors := make([]error, 0)
-	for range chunks {
+	for range pending {
 		workerError := <-results
 		if workerError != nil {
 			workerErrors = append(workerErrors, workerError)
@@ -129,6 +143,7 @@ func (engine *Engine) downloadChunk(
 	totalSize int64,
 	destination *os.File,
 	chunk Chunk,
+	downloaded int64,
 	limiter *rateLimiter,
 	tracker *progressTracker,
 ) error {
@@ -136,7 +151,8 @@ func (engine *Engine) downloadChunk(
 	if err != nil {
 		return fmt.Errorf("create request for chunk %d: %w", chunk.Index, err)
 	}
-	request.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", chunk.Start, chunk.End))
+	requestStart := chunk.Start + downloaded
+	request.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", requestStart, chunk.End))
 	response, err := engine.httpClient.Do(request)
 	if err != nil {
 		return fmt.Errorf("request chunk %d: %w", chunk.Index, err)
@@ -149,12 +165,11 @@ func (engine *Engine) downloadChunk(
 	}
 	contentRange := response.Header.Get("Content-Range")
 	start, end, responseTotal, err := parseContentRange(contentRange)
-	if err != nil || start != chunk.Start || end != chunk.End || responseTotal != totalSize {
+	if err != nil || start != requestStart || end != chunk.End || responseTotal != totalSize {
 		return RangeMismatchError{Chunk: chunk, ContentRange: contentRange}
 	}
 
 	buffer := make([]byte, copyBufferSize)
-	var downloaded int64
 	for {
 		remaining := chunk.Size() - downloaded
 		readLimit := int64(len(buffer))
@@ -193,15 +208,30 @@ func (engine *Engine) downloadChunk(
 	}
 }
 
+func newProgressTracker(engine *Engine, downloadID model.DownloadID, chunks []model.DownloadChunk) *progressTracker {
+	tracker := &progressTracker{
+		byChunk:    make([]int64, len(chunks)),
+		downloadID: downloadID,
+		engine:     engine,
+	}
+	for _, chunk := range chunks {
+		tracker.byChunk[chunk.Index] = chunk.DownloadedBytes
+		tracker.total += chunk.DownloadedBytes
+	}
+
+	return tracker
+}
+
 func (tracker *progressTracker) Add(ctx context.Context, chunk Chunk, byteCount int64) error {
 	tracker.mutex.Lock()
 	defer tracker.mutex.Unlock()
 	tracker.total += byteCount
 	tracker.byChunk[chunk.Index] += byteCount
-	if err := tracker.engine.store.UpdateDownloadProgress(
+	if err := tracker.engine.store.UpdateChunkProgress(
 		ctx,
 		tracker.downloadID,
-		tracker.total,
+		chunk.Index,
+		tracker.byChunk[chunk.Index],
 		tracker.engine.now(),
 	); err != nil {
 		return err
@@ -225,24 +255,74 @@ func (tracker *progressTracker) Total() int64 {
 	return tracker.total
 }
 
-func prepareParallelFile(download model.Download, totalSize int64) (*os.File, string, error) {
+func plannedChunkStates(downloadID model.DownloadID, chunks []Chunk) []model.DownloadChunk {
+	states := make([]model.DownloadChunk, len(chunks))
+	for _, chunk := range chunks {
+		states[chunk.Index] = model.DownloadChunk{
+			DownloadID: downloadID,
+			Index:      chunk.Index,
+			Start:      chunk.Start,
+			End:        chunk.End,
+		}
+	}
+
+	return states
+}
+
+func chunkStatesMatch(states []model.DownloadChunk, chunks []Chunk) bool {
+	if len(states) != len(chunks) {
+		return false
+	}
+	for _, chunk := range chunks {
+		state := states[chunk.Index]
+		if state.Index != chunk.Index || state.Start != chunk.Start || state.End != chunk.End ||
+			state.DownloadedBytes < 0 || state.DownloadedBytes > chunk.Size() {
+			return false
+		}
+	}
+
+	return true
+}
+
+func adjustChunkStatesForSize(states []model.DownloadChunk, fileSize int64) {
+	for index := range states {
+		available := fileSize - states[index].Start
+		if available < 0 {
+			available = 0
+		}
+		if available > states[index].Size() {
+			available = states[index].Size()
+		}
+		if states[index].DownloadedBytes > available {
+			states[index].DownloadedBytes = available
+		}
+	}
+}
+
+func prepareParallelFile(download model.Download, totalSize int64) (*os.File, string, int64, error) {
 	if err := os.MkdirAll(download.Destination, 0o755); err != nil {
-		return nil, "", fmt.Errorf("create destination directory: %w", err)
+		return nil, "", 0, fmt.Errorf("create destination directory: %w", err)
 	}
 	finalPath := filepath.Join(download.Destination, download.Filename)
 	if _, err := os.Stat(finalPath); err == nil {
-		return nil, "", DestinationExistsError{Path: finalPath}
+		return nil, "", 0, DestinationExistsError{Path: finalPath}
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, "", fmt.Errorf("inspect destination file: %w", err)
+		return nil, "", 0, fmt.Errorf("inspect destination file: %w", err)
 	}
-	partial, err := os.OpenFile(partialPath(download), os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0o600)
+	partial, err := os.OpenFile(partialPath(download), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		return nil, "", fmt.Errorf("create parallel partial file: %w", err)
+		return nil, "", 0, fmt.Errorf("create parallel partial file: %w", err)
 	}
+	info, err := partial.Stat()
+	if err != nil {
+		closeError := partial.Close()
+		return nil, "", 0, errors.Join(fmt.Errorf("inspect parallel partial file: %w", err), closeError)
+	}
+	originalSize := info.Size()
 	if err := partial.Truncate(totalSize); err != nil {
 		closeError := partial.Close()
-		return nil, "", errors.Join(fmt.Errorf("size parallel partial file: %w", err), closeError)
+		return nil, "", 0, errors.Join(fmt.Errorf("size parallel partial file: %w", err), closeError)
 	}
 
-	return partial, finalPath, nil
+	return partial, finalPath, originalSize, nil
 }
