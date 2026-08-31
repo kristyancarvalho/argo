@@ -2,12 +2,16 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
 
+	"github.com/kristyancarvalho/argo/internal/daemon"
+	"github.com/kristyancarvalho/argo/internal/downloader"
 	"github.com/kristyancarvalho/argo/internal/ipc"
+	"github.com/kristyancarvalho/argo/internal/storage"
 )
 
 func main() {
@@ -17,7 +21,7 @@ func main() {
 	}
 }
 
-func run() error {
+func run() (runError error) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -25,8 +29,22 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	handler := ipc.NewStatusHandler()
-	server, err := ipc.Listen(socketPath, handler)
+	databasePath, err := storage.DefaultPath()
+	if err != nil {
+		return err
+	}
+	store, err := storage.Open(ctx, databasePath)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		runError = errors.Join(runError, store.Close())
+	}()
+	service := daemon.NewService(ctx, store, downloader.New(store))
+	defer func() {
+		runError = errors.Join(runError, service.Close())
+	}()
+	server, err := ipc.Listen(socketPath, service)
 	if err != nil {
 		return err
 	}
