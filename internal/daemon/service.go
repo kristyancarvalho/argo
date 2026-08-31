@@ -44,6 +44,7 @@ type ServiceOptions struct {
 	NetworkObserver            NetworkObserver
 	PauseOnMetered             bool
 	ResumeAfterMetered         bool
+	DefaultPriority            model.Priority
 }
 
 type priorityUpdate struct {
@@ -72,6 +73,7 @@ type Service struct {
 	resumeAfterMetered bool
 	meteredMutex       sync.Mutex
 	meteredPaused      map[model.DownloadID]struct{}
+	defaultPriority    model.Priority
 }
 
 func NewService(parent context.Context, store Store, engine DownloadEngine) (*Service, error) {
@@ -89,6 +91,12 @@ func NewServiceWithOptions(
 	}
 	if options.MaximumConcurrentDownloads < 0 {
 		return nil, fmt.Errorf("maximum concurrent downloads must be positive")
+	}
+	if options.DefaultPriority == "" {
+		options.DefaultPriority = model.PriorityNormal
+	}
+	if _, err := model.ParsePriority(string(options.DefaultPriority)); err != nil {
+		return nil, err
 	}
 	if err := store.RecoverActiveDownloads(parent, time.Now().UTC()); err != nil {
 		return nil, err
@@ -121,6 +129,7 @@ func NewServiceWithOptions(
 		pauseOnMetered:     options.PauseOnMetered,
 		resumeAfterMetered: options.ResumeAfterMetered,
 		meteredPaused:      make(map[model.DownloadID]struct{}),
+		defaultPriority:    options.DefaultPriority,
 	}
 	service.waitGroup.Add(1)
 	go service.runScheduler()
@@ -170,7 +179,7 @@ func (service *Service) add(ctx context.Context, payload json.RawMessage) (ipc.A
 		return ipc.AddResponse{}, InvalidAddRequestError{Reason: err.Error()}
 	}
 
-	download, err := newDownload(request)
+	download, err := newDownload(request, service.defaultPriority)
 	if err != nil {
 		return ipc.AddResponse{}, err
 	}
@@ -532,7 +541,7 @@ func downloadResponse(download model.Download) ipc.Download {
 	}
 }
 
-func newDownload(request ipc.AddRequest) (model.Download, error) {
+func newDownload(request ipc.AddRequest, priority model.Priority) (model.Download, error) {
 	parsedURL, err := url.Parse(request.URL)
 	if err != nil {
 		return model.Download{}, InvalidAddRequestError{Reason: "URL cannot be parsed"}
@@ -575,7 +584,7 @@ func newDownload(request ipc.AddRequest) (model.Download, error) {
 		TotalSize:       -1,
 		DownloadedBytes: 0,
 		Status:          model.StatusQueued,
-		Priority:        model.PriorityNormal,
+		Priority:        priority,
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}, nil
