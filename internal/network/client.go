@@ -56,6 +56,7 @@ type Snapshot struct {
 	Connectivity     Connectivity
 	Metered          Metered
 	ActiveConnection string
+	ConnectionType   string
 	Interface        string
 }
 
@@ -158,6 +159,19 @@ func (client *Client) ReadState(ctx context.Context) (Snapshot, error) {
 	snapshot.ActiveConnection, err = stringValue("Id", activeValue)
 	if err != nil {
 		return Snapshot{}, err
+	}
+	typeValue, typeError := client.properties.ReadProperty(
+		ctx,
+		NetworkManagerDestination,
+		primaryPath,
+		ActiveConnectionInterface,
+		"Type",
+	)
+	if typeError == nil {
+		snapshot.ConnectionType, err = stringValue("Type", typeValue)
+		if err != nil {
+			return Snapshot{}, err
+		}
 	}
 	devicesValue, err := client.properties.ReadProperty(
 		ctx,

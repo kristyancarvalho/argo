@@ -7,10 +7,23 @@ import (
 )
 
 type Status struct {
-	State           string    `json:"state"`
-	PID             int       `json:"pid"`
-	StartedAt       time.Time `json:"started_at"`
-	ProtocolVersion int       `json:"protocol_version"`
+	State           string        `json:"state"`
+	PID             int           `json:"pid"`
+	StartedAt       time.Time     `json:"started_at"`
+	ProtocolVersion int           `json:"protocol_version"`
+	Network         NetworkStatus `json:"network"`
+	ActiveProfile   string        `json:"active_profile"`
+}
+
+type NetworkStatus struct {
+	Available        bool   `json:"available"`
+	Connected        bool   `json:"connected"`
+	State            string `json:"state"`
+	Connectivity     string `json:"connectivity"`
+	ActiveConnection string `json:"active_connection"`
+	ConnectionType   string `json:"connection_type"`
+	Interface        string `json:"interface"`
+	Metered          string `json:"metered"`
 }
 
 type Handler interface {
@@ -34,10 +47,14 @@ func (handler *StatusHandler) Handle(_ context.Context, request Request) (any, e
 		return nil, UnsupportedOperationError{Operation: request.Operation}
 	}
 
+	return handler.Status(), nil
+}
+
+func (handler *StatusHandler) Status() Status {
 	return Status{
 		State:           "running",
 		PID:             handler.processID,
 		StartedAt:       handler.startedAt,
 		ProtocolVersion: ProtocolVersion,
-	}, nil
+	}
 }

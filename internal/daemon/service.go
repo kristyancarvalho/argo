@@ -95,6 +95,9 @@ type Service struct {
 	activeMutex        sync.Mutex
 	activeCancels      map[model.DownloadID]context.CancelFunc
 	networkObserver    NetworkObserver
+	networkMutex       sync.RWMutex
+	networkSnapshot    network.Snapshot
+	networkAvailable   bool
 	pauseOnMetered     bool
 	resumeAfterMetered bool
 	meteredMutex       sync.Mutex
@@ -225,7 +228,7 @@ func NewServiceWithOptions(
 func (service *Service) Handle(ctx context.Context, request ipc.Request) (any, error) {
 	switch request.Operation {
 	case ipc.OperationStatus:
-		return service.status.Handle(ctx, request)
+		return service.statusResponse(), nil
 	case ipc.OperationAdd:
 		return service.add(ctx, request.Payload)
 	case ipc.OperationPause:
@@ -245,6 +248,29 @@ func (service *Service) Handle(ctx context.Context, request ipc.Request) (any, e
 	default:
 		return nil, ipc.UnsupportedOperationError{Operation: request.Operation}
 	}
+}
+
+func (service *Service) statusResponse() ipc.Status {
+	status := service.status.Status()
+	service.networkMutex.RLock()
+	snapshot := service.networkSnapshot
+	available := service.networkAvailable
+	service.networkMutex.RUnlock()
+	status.Network = ipc.NetworkStatus{
+		Available:        available,
+		Connected:        snapshot.Connected,
+		State:            string(snapshot.State),
+		Connectivity:     string(snapshot.Connectivity),
+		ActiveConnection: snapshot.ActiveConnection,
+		ConnectionType:   snapshot.ConnectionType,
+		Interface:        snapshot.Interface,
+		Metered:          string(snapshot.Metered),
+	}
+	service.profileMutex.RLock()
+	status.ActiveProfile = service.activeProfile
+	service.profileMutex.RUnlock()
+
+	return status
 }
 
 func (service *Service) Close() error {

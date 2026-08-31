@@ -124,6 +124,8 @@ func (properties *observableNetworkProperties) ReadProperty(
 		return "/", nil
 	case path == testActivePath && property == "Id":
 		return properties.connection, nil
+	case path == testActivePath && property == "Type":
+		return "802-3-ethernet", nil
 	case path == testActivePath && property == "Devices":
 		return []string{testDevicePath}, nil
 	case path == testDevicePath && property == "Interface":
