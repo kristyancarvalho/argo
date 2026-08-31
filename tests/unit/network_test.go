@@ -60,8 +60,8 @@ func TestNetworkManagerDisconnectedState(t *testing.T) {
 		snapshot.Interface != "" {
 		t.Fatalf("unexpected disconnected state: %+v", snapshot)
 	}
-	if len(reader.calls) != 3 {
-		t.Fatalf("disconnected state made %d property calls, expected 3", len(reader.calls))
+	if len(reader.calls) != 4 {
+		t.Fatalf("disconnected state made %d property calls, expected 4", len(reader.calls))
 	}
 }
 
@@ -70,6 +70,12 @@ func TestNetworkManagerActiveConnectionAndInterfaceResolution(t *testing.T) {
 	firstDevice := "/org/freedesktop/NetworkManager/Devices/2"
 	secondDevice := "/org/freedesktop/NetworkManager/Devices/3"
 	reader := managerPropertyReader(uint32(70), uint32(4), activePath)
+	reader.values[propertyKey{
+		destination:   argonetwork.NetworkManagerDestination,
+		path:          argonetwork.NetworkManagerPath,
+		interfaceName: argonetwork.NetworkManagerInterface,
+		property:      "Metered",
+	}] = uint32(3)
 	reader.values[propertyKey{
 		destination:   argonetwork.NetworkManagerDestination,
 		path:          activePath,
@@ -102,6 +108,8 @@ func TestNetworkManagerActiveConnectionAndInterfaceResolution(t *testing.T) {
 	if !snapshot.Connected ||
 		snapshot.State != argonetwork.ConnectionGlobal ||
 		snapshot.Connectivity != argonetwork.ConnectivityFull ||
+		snapshot.Metered != argonetwork.MeteredGuessYes ||
+		!snapshot.Metered.IsMetered() ||
 		snapshot.ActiveConnection != "Office Wi-Fi" ||
 		snapshot.Interface != "wlan0" {
 		t.Fatalf("unexpected active network state: %+v", snapshot)
@@ -128,6 +136,23 @@ func TestNetworkManagerPropertyErrorsAndTypes(t *testing.T) {
 	}
 }
 
+func TestNetworkManagerMissingMeteredStateIsUnknown(t *testing.T) {
+	reader := managerPropertyReader(uint32(70), uint32(4), "/")
+	delete(reader.values, propertyKey{
+		destination:   argonetwork.NetworkManagerDestination,
+		path:          argonetwork.NetworkManagerPath,
+		interfaceName: argonetwork.NetworkManagerInterface,
+		property:      "Metered",
+	})
+	snapshot, err := argonetwork.NewClient(reader).ReadState(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Metered != argonetwork.MeteredUnknown || snapshot.Metered.IsMetered() {
+		t.Fatalf("missing metered property produced %q", snapshot.Metered)
+	}
+}
+
 func managerPropertyReader(state any, connectivity any, primary string) *networkPropertyReader {
 	values := map[propertyKey]any{
 		{
@@ -142,6 +167,12 @@ func managerPropertyReader(state any, connectivity any, primary string) *network
 			interfaceName: argonetwork.NetworkManagerInterface,
 			property:      "Connectivity",
 		}: connectivity,
+		{
+			destination:   argonetwork.NetworkManagerDestination,
+			path:          argonetwork.NetworkManagerPath,
+			interfaceName: argonetwork.NetworkManagerInterface,
+			property:      "Metered",
+		}: uint32(0),
 		{
 			destination:   argonetwork.NetworkManagerDestination,
 			path:          argonetwork.NetworkManagerPath,

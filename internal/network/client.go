@@ -40,10 +40,21 @@ const (
 	ConnectionGlobal       ConnectionState = "connected-global"
 )
 
+type Metered string
+
+const (
+	MeteredUnknown  Metered = "unknown"
+	MeteredYes      Metered = "yes"
+	MeteredNo       Metered = "no"
+	MeteredGuessYes Metered = "guess-yes"
+	MeteredGuessNo  Metered = "guess-no"
+)
+
 type Snapshot struct {
 	Connected        bool
 	State            ConnectionState
 	Connectivity     Connectivity
+	Metered          Metered
 	ActiveConnection string
 	Interface        string
 }
@@ -108,6 +119,14 @@ func (client *Client) ReadState(ctx context.Context) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
+	metered := MeteredUnknown
+	if meteredValue, meteredError := client.readManagerProperty(ctx, "Metered"); meteredError == nil {
+		meteredCode, err := uint32Value("Metered", meteredValue)
+		if err != nil {
+			return Snapshot{}, err
+		}
+		metered = decodeMetered(meteredCode)
+	}
 	primaryValue, err := client.readManagerProperty(ctx, "PrimaryConnection")
 	if err != nil {
 		return Snapshot{}, err
@@ -120,6 +139,7 @@ func (client *Client) ReadState(ctx context.Context) (Snapshot, error) {
 		Connected:    stateCode >= 50 && stateCode <= 70,
 		State:        decodeConnectionState(stateCode),
 		Connectivity: decodeConnectivity(connectivityCode),
+		Metered:      metered,
 	}
 	if primaryPath == "" || primaryPath == disconnectedObjectPath {
 		return snapshot, nil
@@ -290,4 +310,23 @@ func decodeConnectionState(value uint32) ConnectionState {
 	default:
 		return ConnectionUnknown
 	}
+}
+
+func decodeMetered(value uint32) Metered {
+	switch value {
+	case 1:
+		return MeteredYes
+	case 2:
+		return MeteredNo
+	case 3:
+		return MeteredGuessYes
+	case 4:
+		return MeteredGuessNo
+	default:
+		return MeteredUnknown
+	}
+}
+
+func (metered Metered) IsMetered() bool {
+	return metered == MeteredYes || metered == MeteredGuessYes
 }
