@@ -140,6 +140,11 @@ func (server *Server) handleConnection(ctx context.Context, connection *net.Unix
 			server.writeError(connection, request.ID, "unsupported_operation", err.Error())
 			return
 		}
+		var codedError CodedError
+		if errors.As(err, &codedError) {
+			server.writeError(connection, request.ID, codedError.Code(), err.Error())
+			return
+		}
 		server.writeError(connection, request.ID, "internal_error", err.Error())
 		return
 	}

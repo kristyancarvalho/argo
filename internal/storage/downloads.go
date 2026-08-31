@@ -142,6 +142,48 @@ func (store *Store) UpdateDownloadProgress(
 	return InvalidProgressError{Downloaded: downloaded, Total: total}
 }
 
+func (store *Store) UpdateDownloadDetails(
+	ctx context.Context,
+	id model.DownloadID,
+	filename string,
+	totalSize int64,
+	updatedAt time.Time,
+) error {
+	if filename == "" {
+		return fmt.Errorf("download filename is empty")
+	}
+	if totalSize < -1 {
+		return InvalidProgressError{Downloaded: 0, Total: totalSize}
+	}
+
+	result, err := store.database.ExecContext(ctx, `UPDATE downloads
+        SET filename = ?, total_size = ?, updated_at = ?
+        WHERE id = ? AND (downloaded_bytes <= ? OR ? = -1)`,
+		filename,
+		totalSize,
+		formatTime(updatedAt),
+		id.String(),
+		totalSize,
+		totalSize,
+	)
+	if err != nil {
+		return fmt.Errorf("update details for download %s: %w", id, err)
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read details update result for download %s: %w", id, err)
+	}
+	if updated == 1 {
+		return nil
+	}
+	download, err := store.Download(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	return InvalidProgressError{Downloaded: download.DownloadedBytes, Total: totalSize}
+}
+
 func (store *Store) UpdateDownloadStatus(
 	ctx context.Context,
 	id model.DownloadID,

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"time"
 )
 
@@ -30,6 +31,26 @@ func (client *Client) Status(ctx context.Context) (Status, error) {
 	}
 
 	return status, nil
+}
+
+func (client *Client) Add(ctx context.Context, rawURL, destination string) (AddResponse, error) {
+	if destination == "" {
+		workingDirectory, err := os.Getwd()
+		if err != nil {
+			return AddResponse{}, fmt.Errorf("determine download destination: %w", err)
+		}
+		destination = workingDirectory
+	}
+
+	var response AddResponse
+	if err := client.Call(ctx, OperationAdd, AddRequest{
+		URL:         rawURL,
+		Destination: destination,
+	}, &response); err != nil {
+		return AddResponse{}, err
+	}
+
+	return response, nil
 }
 
 func (client *Client) Call(ctx context.Context, operation Operation, payload any, result any) error {

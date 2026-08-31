@@ -9,7 +9,10 @@ const ProtocolVersion = 1
 
 type Operation string
 
-const OperationStatus Operation = "status"
+const (
+	OperationStatus Operation = "status"
+	OperationAdd    Operation = "add"
+)
 
 type Request struct {
 	Version   int             `json:"version"`
@@ -31,9 +34,26 @@ type ResponseError struct {
 	Message string `json:"message"`
 }
 
+type AddRequest struct {
+	URL         string `json:"url"`
+	Destination string `json:"destination"`
+}
+
+type AddResponse struct {
+	ID          string `json:"id"`
+	Filename    string `json:"filename"`
+	Destination string `json:"destination"`
+	Status      string `json:"status"`
+}
+
 type RemoteError struct {
 	Code    string
 	Message string
+}
+
+type CodedError interface {
+	error
+	Code() string
 }
 
 func (err RemoteError) Error() string {

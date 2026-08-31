@@ -29,7 +29,11 @@ func TestDaemonExecutableLifecycle(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, binary)
-	command.Env = append(os.Environ(), "XDG_RUNTIME_DIR="+temporaryDirectory)
+	command.Env = append(
+		os.Environ(),
+		"XDG_RUNTIME_DIR="+temporaryDirectory,
+		"XDG_DATA_HOME="+filepath.Join(temporaryDirectory, "data"),
+	)
 	var standardError bytes.Buffer
 	command.Stderr = &standardError
 	if err := command.Start(); err != nil {
