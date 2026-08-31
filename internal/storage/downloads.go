@@ -12,7 +12,7 @@ import (
 
 const downloadColumns = `id, url, destination, filename, total_size, downloaded_bytes,
     status, priority, created_at, updated_at, started_at, completed_at,
-    etag, last_modified, error_message`
+    etag, last_modified, range_supported, error_message`
 
 type scanner interface {
 	Scan(destinations ...any) error
@@ -26,8 +26,8 @@ func (store *Store) CreateDownload(ctx context.Context, download model.Download)
 	_, err := store.database.ExecContext(ctx, `INSERT INTO downloads (
         id, url, destination, filename, total_size, downloaded_bytes,
         status, priority, created_at, updated_at, started_at, completed_at,
-        etag, last_modified, error_message
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        etag, last_modified, range_supported, error_message
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		download.ID.String(),
 		download.URL,
 		download.Destination,
@@ -42,6 +42,7 @@ func (store *Store) CreateDownload(ctx context.Context, download model.Download)
 		nullableTime(download.CompletedAt),
 		download.ETag,
 		download.LastModified,
+		download.RangeSupported,
 		download.Error,
 	)
 	if err != nil {
@@ -157,36 +158,70 @@ func (store *Store) UpdateDownloadProgress(
 	return InvalidProgressError{Downloaded: downloaded, Total: total}
 }
 
-func (store *Store) UpdateDownloadDetails(
+func (store *Store) UpdateDownloadPriority(
 	ctx context.Context,
 	id model.DownloadID,
-	filename string,
-	totalSize int64,
+	priority model.Priority,
 	updatedAt time.Time,
 ) error {
-	if filename == "" {
-		return fmt.Errorf("download filename is empty")
+	if _, err := model.ParsePriority(string(priority)); err != nil {
+		return err
 	}
+	result, err := store.database.ExecContext(ctx, `UPDATE downloads
+        SET priority = ?, updated_at = ? WHERE id = ?`,
+		string(priority),
+		formatTime(updatedAt),
+		id.String(),
+	)
+	if err != nil {
+		return fmt.Errorf("update priority for download %s: %w", id, err)
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read priority update result for download %s: %w", id, err)
+	}
+	if updated != 1 {
+		return fmt.Errorf("%w: %s", ErrDownloadNotFound, id)
+	}
+
+	return nil
+}
+
+func (store *Store) UpdateRemoteMetadata(
+	ctx context.Context,
+	id model.DownloadID,
+	totalSize int64,
+	rangeSupported bool,
+	etag string,
+	lastModified string,
+	updatedAt time.Time,
+) error {
 	if totalSize < -1 {
 		return InvalidProgressError{Downloaded: 0, Total: totalSize}
 	}
 
-	result, err := store.database.ExecContext(ctx, `UPDATE downloads
-        SET filename = ?, total_size = ?, updated_at = ?
+	result, err := store.database.ExecContext(ctx, `UPDATE downloads SET
+        total_size = ?,
+        range_supported = ?,
+        etag = ?,
+        last_modified = ?,
+        updated_at = ?
         WHERE id = ? AND (downloaded_bytes <= ? OR ? = -1)`,
-		filename,
 		totalSize,
+		rangeSupported,
+		etag,
+		lastModified,
 		formatTime(updatedAt),
 		id.String(),
 		totalSize,
 		totalSize,
 	)
 	if err != nil {
-		return fmt.Errorf("update details for download %s: %w", id, err)
+		return fmt.Errorf("update remote metadata for download %s: %w", id, err)
 	}
 	updated, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("read details update result for download %s: %w", id, err)
+		return fmt.Errorf("read metadata update result for download %s: %w", id, err)
 	}
 	if updated == 1 {
 		return nil
@@ -293,6 +328,7 @@ func scanDownload(source scanner) (model.Download, error) {
 	var updatedAt string
 	var startedAt sql.NullString
 	var completedAt sql.NullString
+	var rangeSupported bool
 
 	if err := source.Scan(
 		&identifier,
@@ -309,6 +345,7 @@ func scanDownload(source scanner) (model.Download, error) {
 		&completedAt,
 		&download.ETag,
 		&download.LastModified,
+		&rangeSupported,
 		&download.Error,
 	); err != nil {
 		return model.Download{}, err
@@ -340,6 +377,7 @@ func scanDownload(source scanner) (model.Download, error) {
 			return model.Download{}, fmt.Errorf("parse completed time: %w", err)
 		}
 	}
+	download.RangeSupported = rangeSupported
 
 	return download, nil
 }

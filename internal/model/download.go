@@ -151,5 +151,18 @@ type Download struct {
 	CompletedAt     time.Time
 	ETag            string
 	LastModified    string
+	RangeSupported  bool
 	Error           string
+}
+
+type DownloadChunk struct {
+	DownloadID      DownloadID
+	Index           int
+	Start           int64
+	End             int64
+	DownloadedBytes int64
+}
+
+func (chunk DownloadChunk) Size() int64 {
+	return chunk.End - chunk.Start + 1
 }

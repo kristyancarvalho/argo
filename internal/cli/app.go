@@ -16,6 +16,7 @@ type Client interface {
 	Pause(context.Context, string) (ipc.DownloadActionResponse, error)
 	Resume(context.Context, string) (ipc.DownloadActionResponse, error)
 	Cancel(context.Context, string) (ipc.DownloadActionResponse, error)
+	Priority(context.Context, string, string) (ipc.PriorityResponse, error)
 	Status(context.Context) (ipc.Status, error)
 }
 
@@ -39,6 +40,10 @@ func Run(ctx context.Context, client Client, output io.Writer, arguments []strin
 		return runAction(ctx, client.Resume, output, command, operands)
 	case "cancel":
 		return runAction(ctx, client.Cancel, output, command, operands)
+	case "priority":
+		return runPriority(ctx, client, output, operands)
+	case "watch":
+		return runWatch(ctx, client, output, operands)
 	case "status":
 		return runStatus(ctx, client, output, operands)
 	default:
@@ -126,6 +131,29 @@ func runAction(
 		return err
 	}
 	_, err = fmt.Fprintf(output, "%s: %s\n", response.ID, response.Status)
+
+	return err
+}
+
+func runWatch(ctx context.Context, client Client, output io.Writer, arguments []string) error {
+	if len(arguments) != 0 {
+		return UsageError{Message: "argo watch"}
+	}
+
+	return NewWatcher(client).Stream(ctx, func(snapshot WatchSnapshot) error {
+		return renderWatchSnapshot(output, snapshot)
+	})
+}
+
+func runPriority(ctx context.Context, client Client, output io.Writer, arguments []string) error {
+	if len(arguments) != 2 {
+		return UsageError{Message: "argo priority <id> <priority>"}
+	}
+	response, err := client.Priority(ctx, arguments[0], arguments[1])
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(output, "%s: %s\n", response.ID, response.Priority)
 
 	return err
 }

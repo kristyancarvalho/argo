@@ -16,15 +16,17 @@ import (
 
 	"github.com/kristyancarvalho/argo/internal/ipc"
 	"github.com/kristyancarvalho/argo/internal/model"
+	"github.com/kristyancarvalho/argo/internal/scheduler"
 )
 
-const queueCapacity = 64
+const DefaultMaximumConcurrentDownloads = 3
 
 type Store interface {
 	CreateDownload(context.Context, model.Download) error
 	Download(context.Context, model.DownloadID) (model.Download, error)
 	Downloads(context.Context) ([]model.Download, error)
 	RecoverActiveDownloads(context.Context, time.Time) error
+	UpdateDownloadPriority(context.Context, model.DownloadID, model.Priority, time.Time) error
 	UpdateDownloadStatus(context.Context, model.DownloadID, model.Status, time.Time, string) error
 }
 
@@ -32,22 +34,49 @@ type DownloadEngine interface {
 	Download(context.Context, model.Download) error
 }
 
+type ServiceOptions struct {
+	MaximumConcurrentDownloads int
+}
+
+type priorityUpdate struct {
+	identifier model.DownloadID
+	priority   model.Priority
+	completed  chan struct{}
+}
+
 type Service struct {
-	store        Store
-	engine       DownloadEngine
-	status       *ipc.StatusHandler
-	jobs         chan model.DownloadID
-	initial      []model.DownloadID
-	ctx          context.Context
-	cancel       context.CancelFunc
-	waitGroup    sync.WaitGroup
-	closeOnce    sync.Once
-	activeMutex  sync.Mutex
-	activeID     model.DownloadID
-	activeCancel context.CancelFunc
+	store         Store
+	engine        DownloadEngine
+	status        *ipc.StatusHandler
+	jobs          chan scheduler.Entry
+	priorities    chan priorityUpdate
+	completed     chan model.DownloadID
+	initial       []scheduler.Entry
+	maximumActive int
+	ctx           context.Context
+	cancel        context.CancelFunc
+	waitGroup     sync.WaitGroup
+	closeOnce     sync.Once
+	activeMutex   sync.Mutex
+	activeCancels map[model.DownloadID]context.CancelFunc
 }
 
 func NewService(parent context.Context, store Store, engine DownloadEngine) (*Service, error) {
+	return NewServiceWithOptions(parent, store, engine, ServiceOptions{})
+}
+
+func NewServiceWithOptions(
+	parent context.Context,
+	store Store,
+	engine DownloadEngine,
+	options ServiceOptions,
+) (*Service, error) {
+	if options.MaximumConcurrentDownloads == 0 {
+		options.MaximumConcurrentDownloads = DefaultMaximumConcurrentDownloads
+	}
+	if options.MaximumConcurrentDownloads < 0 {
+		return nil, fmt.Errorf("maximum concurrent downloads must be positive")
+	}
 	if err := store.RecoverActiveDownloads(parent, time.Now().UTC()); err != nil {
 		return nil, err
 	}
@@ -55,25 +84,29 @@ func NewService(parent context.Context, store Store, engine DownloadEngine) (*Se
 	if err != nil {
 		return nil, err
 	}
-	initial := make([]model.DownloadID, 0)
+	initial := make([]scheduler.Entry, 0)
 	for _, download := range downloads {
 		if download.Status == model.StatusQueued {
-			initial = append(initial, download.ID)
+			initial = append(initial, scheduler.Entry{ID: download.ID, Priority: download.Priority})
 		}
 	}
 
 	ctx, cancel := context.WithCancel(parent)
 	service := &Service{
-		store:   store,
-		engine:  engine,
-		status:  ipc.NewStatusHandler(),
-		jobs:    make(chan model.DownloadID, queueCapacity),
-		initial: initial,
-		ctx:     ctx,
-		cancel:  cancel,
+		store:         store,
+		engine:        engine,
+		status:        ipc.NewStatusHandler(),
+		jobs:          make(chan scheduler.Entry),
+		priorities:    make(chan priorityUpdate),
+		completed:     make(chan model.DownloadID),
+		initial:       initial,
+		maximumActive: options.MaximumConcurrentDownloads,
+		ctx:           ctx,
+		cancel:        cancel,
+		activeCancels: make(map[model.DownloadID]context.CancelFunc),
 	}
 	service.waitGroup.Add(1)
-	go service.runWorker()
+	go service.runScheduler()
 
 	return service, nil
 }
@@ -90,6 +123,8 @@ func (service *Service) Handle(ctx context.Context, request ipc.Request) (any, e
 		return service.resume(ctx, request.Payload)
 	case ipc.OperationCancel:
 		return service.cancelDownload(ctx, request.Payload)
+	case ipc.OperationPriority:
+		return service.setPriority(ctx, request.Payload)
 	case ipc.OperationList:
 		return service.list(ctx)
 	case ipc.OperationShow:
@@ -121,7 +156,7 @@ func (service *Service) add(ctx context.Context, payload json.RawMessage) (ipc.A
 	if err := service.store.CreateDownload(ctx, download); err != nil {
 		return ipc.AddResponse{}, fmt.Errorf("persist added download: %w", err)
 	}
-	if err := service.enqueue(ctx, download.ID); err != nil {
+	if err := service.enqueue(ctx, download.ID, download.Priority); err != nil {
 		now := time.Now().UTC()
 		statusErr := service.store.UpdateDownloadStatus(
 			context.WithoutCancel(ctx),
@@ -170,11 +205,7 @@ func (service *Service) pause(ctx context.Context, payload json.RawMessage) (ipc
 		return ipc.DownloadActionResponse{}, err
 	}
 
-	service.activeMutex.Lock()
-	if service.activeID == identifier && service.activeCancel != nil {
-		service.activeCancel()
-	}
-	service.activeMutex.Unlock()
+	service.cancelActive(identifier)
 
 	return actionResponse(identifier, model.StatusPaused), nil
 }
@@ -203,7 +234,7 @@ func (service *Service) resume(ctx context.Context, payload json.RawMessage) (ip
 	if err := service.store.UpdateDownloadStatus(ctx, identifier, status, time.Now().UTC(), ""); err != nil {
 		return ipc.DownloadActionResponse{}, err
 	}
-	if err := service.enqueue(ctx, identifier); err != nil {
+	if err := service.enqueue(ctx, identifier, download.Priority); err != nil {
 		return ipc.DownloadActionResponse{}, err
 	}
 
@@ -228,6 +259,36 @@ func (service *Service) actionDownload(
 	}
 
 	return identifier, download, nil
+}
+
+func (service *Service) setPriority(
+	ctx context.Context,
+	payload json.RawMessage,
+) (ipc.PriorityResponse, error) {
+	var request ipc.PriorityRequest
+	if err := decodePayload(payload, &request); err != nil {
+		return ipc.PriorityResponse{}, InvalidDownloadActionError{Action: "priority", Reason: err.Error()}
+	}
+	identifier, err := model.ParseDownloadID(request.ID)
+	if err != nil {
+		return ipc.PriorityResponse{}, InvalidDownloadActionError{
+			ID:     request.ID,
+			Action: "priority",
+			Reason: err.Error(),
+		}
+	}
+	priority, err := model.ParsePriority(request.Priority)
+	if err != nil {
+		return ipc.PriorityResponse{}, err
+	}
+	if err := service.store.UpdateDownloadPriority(ctx, identifier, priority, time.Now().UTC()); err != nil {
+		return ipc.PriorityResponse{}, err
+	}
+	if err := service.updateScheduledPriority(ctx, identifier, priority); err != nil {
+		return ipc.PriorityResponse{}, err
+	}
+
+	return ipc.PriorityResponse{ID: identifier.String(), Priority: string(priority)}, nil
 }
 
 func (service *Service) cancelDownload(
@@ -266,11 +327,7 @@ func (service *Service) cancelDownload(
 		return ipc.DownloadActionResponse{}, err
 	}
 
-	service.activeMutex.Lock()
-	if service.activeID == identifier && service.activeCancel != nil {
-		service.activeCancel()
-	}
-	service.activeMutex.Unlock()
+	service.cancelActive(identifier)
 
 	return actionResponse(identifier, model.StatusCanceled), nil
 }
@@ -305,38 +362,98 @@ func (service *Service) show(ctx context.Context, payload json.RawMessage) (ipc.
 	return downloadResponse(download), nil
 }
 
-func (service *Service) enqueue(ctx context.Context, identifier model.DownloadID) error {
+func (service *Service) enqueue(
+	ctx context.Context,
+	identifier model.DownloadID,
+	priority model.Priority,
+) error {
 	select {
-	case service.jobs <- identifier:
+	case service.jobs <- scheduler.Entry{ID: identifier, Priority: priority}:
 		return nil
 	case <-service.ctx.Done():
 		return fmt.Errorf("daemon is shutting down")
 	case <-ctx.Done():
 		return ctx.Err()
-	default:
-		return QueueFullError{Capacity: queueCapacity}
 	}
 }
 
-func (service *Service) runWorker() {
-	defer service.waitGroup.Done()
-	for _, identifier := range service.initial {
-		if service.ctx.Err() != nil {
-			return
-		}
-		service.process(identifier)
+func (service *Service) updateScheduledPriority(
+	ctx context.Context,
+	identifier model.DownloadID,
+	priority model.Priority,
+) error {
+	update := priorityUpdate{
+		identifier: identifier,
+		priority:   priority,
+		completed:  make(chan struct{}),
 	}
+	select {
+	case service.priorities <- update:
+	case <-service.ctx.Done():
+		return fmt.Errorf("daemon is shutting down")
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	select {
+	case <-update.completed:
+		return nil
+	case <-service.ctx.Done():
+		return fmt.Errorf("daemon is shutting down")
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (service *Service) runScheduler() {
+	defer service.waitGroup.Done()
+	queue := scheduler.NewQueue(service.initial)
 	for {
+		for queue.Active() < service.maximumActive {
+			identifier, available := queue.Next()
+			if !available {
+				break
+			}
+			service.start(identifier)
+		}
 		select {
 		case <-service.ctx.Done():
 			return
-		case identifier := <-service.jobs:
-			service.process(identifier)
+		case entry := <-service.jobs:
+			queue.Enqueue(entry)
+		case update := <-service.priorities:
+			queue.UpdatePriority(update.identifier, update.priority)
+			close(update.completed)
+		case identifier := <-service.completed:
+			queue.Complete(identifier)
 		}
 	}
 }
 
-func (service *Service) process(identifier model.DownloadID) {
+func (service *Service) start(identifier model.DownloadID) {
+	downloadContext, cancel := context.WithCancel(service.ctx)
+	service.activeMutex.Lock()
+	service.activeCancels[identifier] = cancel
+	service.activeMutex.Unlock()
+	service.waitGroup.Add(1)
+	go service.process(downloadContext, identifier, cancel)
+}
+
+func (service *Service) process(
+	downloadContext context.Context,
+	identifier model.DownloadID,
+	cancel context.CancelFunc,
+) {
+	defer service.waitGroup.Done()
+	defer func() {
+		cancel()
+		service.activeMutex.Lock()
+		delete(service.activeCancels, identifier)
+		service.activeMutex.Unlock()
+		select {
+		case service.completed <- identifier:
+		case <-service.ctx.Done():
+		}
+	}()
 	download, err := service.store.Download(service.ctx, identifier)
 	if err != nil {
 		return
@@ -345,19 +462,13 @@ func (service *Service) process(identifier model.DownloadID) {
 		return
 	}
 
-	downloadContext, cancel := context.WithCancel(service.ctx)
-	service.activeMutex.Lock()
-	service.activeID = identifier
-	service.activeCancel = cancel
-	service.activeMutex.Unlock()
-
 	_ = service.engine.Download(downloadContext, download)
-	cancel()
+}
 
+func (service *Service) cancelActive(identifier model.DownloadID) {
 	service.activeMutex.Lock()
-	if service.activeID == identifier {
-		service.activeID = ""
-		service.activeCancel = nil
+	if cancel := service.activeCancels[identifier]; cancel != nil {
+		cancel()
 	}
 	service.activeMutex.Unlock()
 }

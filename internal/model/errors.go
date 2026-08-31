@@ -26,6 +26,10 @@ func (err InvalidPriorityError) Error() string {
 	return fmt.Sprintf("invalid download priority %q", err.Value)
 }
 
+func (err InvalidPriorityError) Code() string {
+	return "invalid_priority"
+}
+
 type InvalidTransitionError struct {
 	From Status
 	To   Status

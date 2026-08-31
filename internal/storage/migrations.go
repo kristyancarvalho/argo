@@ -47,6 +47,31 @@ var migrations = []migration{
              ON downloads (status, priority, created_at, id)`,
 		},
 	},
+	{
+		version: 3,
+		statements: []string{
+			`ALTER TABLE downloads
+             ADD COLUMN range_supported INTEGER NOT NULL DEFAULT 0
+             CHECK (range_supported IN (0, 1))`,
+		},
+	},
+	{
+		version: 4,
+		statements: []string{
+			`CREATE TABLE download_chunks (
+                download_id TEXT NOT NULL REFERENCES downloads(id) ON DELETE CASCADE,
+                chunk_index INTEGER NOT NULL CHECK (chunk_index >= 0),
+                start_byte INTEGER NOT NULL CHECK (start_byte >= 0),
+                end_byte INTEGER NOT NULL CHECK (end_byte >= start_byte),
+                downloaded_bytes INTEGER NOT NULL CHECK (
+                    downloaded_bytes >= 0 AND downloaded_bytes <= end_byte - start_byte + 1
+                ),
+                PRIMARY KEY (download_id, chunk_index)
+            )`,
+			`CREATE UNIQUE INDEX download_chunks_bounds_idx
+             ON download_chunks (download_id, start_byte, end_byte)`,
+		},
+	},
 }
 
 func migrate(ctx context.Context, database *sql.DB) error {

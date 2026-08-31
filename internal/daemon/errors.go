@@ -18,18 +18,6 @@ func (err InvalidAddRequestError) Code() string {
 	return "invalid_request"
 }
 
-type QueueFullError struct {
-	Capacity int
-}
-
-func (err QueueFullError) Error() string {
-	return fmt.Sprintf("download queue capacity %d reached", err.Capacity)
-}
-
-func (err QueueFullError) Code() string {
-	return "queue_full"
-}
-
 type InvalidDownloadActionError struct {
 	ID     string
 	Action string
