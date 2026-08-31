@@ -14,6 +14,7 @@ import (
 	"github.com/kristyancarvalho/argo/internal/daemon"
 	"github.com/kristyancarvalho/argo/internal/downloader"
 	"github.com/kristyancarvalho/argo/internal/ipc"
+	"github.com/kristyancarvalho/argo/internal/network"
 	"github.com/kristyancarvalho/argo/internal/storage"
 )
 
@@ -28,6 +29,12 @@ func run(arguments []string) (runError error) {
 	flags := flag.NewFlagSet("argod", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	rateLimit := flags.Int64("rate-limit", 0, "maximum download bytes per second")
+	pauseOnMetered := flags.Bool("pause-on-metered", false, "pause downloads on metered connections")
+	resumeAfterMetered := flags.Bool(
+		"resume-after-metered",
+		false,
+		"resume automatically paused downloads on unmetered connections",
+	)
 	if err := flags.Parse(arguments); err != nil {
 		return fmt.Errorf("parse daemon arguments: %w", err)
 	}
@@ -36,6 +43,9 @@ func run(arguments []string) (runError error) {
 	}
 	if *rateLimit < 0 {
 		return fmt.Errorf("rate limit must not be negative")
+	}
+	if *resumeAfterMetered && !*pauseOnMetered {
+		return fmt.Errorf("resume after metered requires pause on metered")
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -57,7 +67,19 @@ func run(arguments []string) (runError error) {
 		runError = errors.Join(runError, store.Close())
 	}()
 	engine := downloader.NewWithRateLimit(store, http.DefaultClient, *rateLimit)
-	service, err := daemon.NewService(ctx, store, engine)
+	var networkObserver daemon.NetworkObserver
+	networkClient, networkError := network.ConnectSystem()
+	if networkError == nil {
+		networkObserver = networkClient
+		defer func() {
+			runError = errors.Join(runError, networkClient.Close())
+		}()
+	}
+	service, err := daemon.NewServiceWithOptions(ctx, store, engine, daemon.ServiceOptions{
+		NetworkObserver:    networkObserver,
+		PauseOnMetered:     *pauseOnMetered,
+		ResumeAfterMetered: *resumeAfterMetered,
+	})
 	if err != nil {
 		return err
 	}

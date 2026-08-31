@@ -16,6 +16,7 @@ import (
 
 	"github.com/kristyancarvalho/argo/internal/ipc"
 	"github.com/kristyancarvalho/argo/internal/model"
+	"github.com/kristyancarvalho/argo/internal/network"
 	"github.com/kristyancarvalho/argo/internal/scheduler"
 )
 
@@ -34,8 +35,15 @@ type DownloadEngine interface {
 	Download(context.Context, model.Download) error
 }
 
+type NetworkObserver interface {
+	Observe(context.Context, func(network.Snapshot) error) error
+}
+
 type ServiceOptions struct {
 	MaximumConcurrentDownloads int
+	NetworkObserver            NetworkObserver
+	PauseOnMetered             bool
+	ResumeAfterMetered         bool
 }
 
 type priorityUpdate struct {
@@ -45,20 +53,25 @@ type priorityUpdate struct {
 }
 
 type Service struct {
-	store         Store
-	engine        DownloadEngine
-	status        *ipc.StatusHandler
-	jobs          chan scheduler.Entry
-	priorities    chan priorityUpdate
-	completed     chan model.DownloadID
-	initial       []scheduler.Entry
-	maximumActive int
-	ctx           context.Context
-	cancel        context.CancelFunc
-	waitGroup     sync.WaitGroup
-	closeOnce     sync.Once
-	activeMutex   sync.Mutex
-	activeCancels map[model.DownloadID]context.CancelFunc
+	store              Store
+	engine             DownloadEngine
+	status             *ipc.StatusHandler
+	jobs               chan scheduler.Entry
+	priorities         chan priorityUpdate
+	completed          chan model.DownloadID
+	initial            []scheduler.Entry
+	maximumActive      int
+	ctx                context.Context
+	cancel             context.CancelFunc
+	waitGroup          sync.WaitGroup
+	closeOnce          sync.Once
+	activeMutex        sync.Mutex
+	activeCancels      map[model.DownloadID]context.CancelFunc
+	networkObserver    NetworkObserver
+	pauseOnMetered     bool
+	resumeAfterMetered bool
+	meteredMutex       sync.Mutex
+	meteredPaused      map[model.DownloadID]struct{}
 }
 
 func NewService(parent context.Context, store Store, engine DownloadEngine) (*Service, error) {
@@ -93,20 +106,28 @@ func NewServiceWithOptions(
 
 	ctx, cancel := context.WithCancel(parent)
 	service := &Service{
-		store:         store,
-		engine:        engine,
-		status:        ipc.NewStatusHandler(),
-		jobs:          make(chan scheduler.Entry),
-		priorities:    make(chan priorityUpdate),
-		completed:     make(chan model.DownloadID),
-		initial:       initial,
-		maximumActive: options.MaximumConcurrentDownloads,
-		ctx:           ctx,
-		cancel:        cancel,
-		activeCancels: make(map[model.DownloadID]context.CancelFunc),
+		store:              store,
+		engine:             engine,
+		status:             ipc.NewStatusHandler(),
+		jobs:               make(chan scheduler.Entry),
+		priorities:         make(chan priorityUpdate),
+		completed:          make(chan model.DownloadID),
+		initial:            initial,
+		maximumActive:      options.MaximumConcurrentDownloads,
+		ctx:                ctx,
+		cancel:             cancel,
+		activeCancels:      make(map[model.DownloadID]context.CancelFunc),
+		networkObserver:    options.NetworkObserver,
+		pauseOnMetered:     options.PauseOnMetered,
+		resumeAfterMetered: options.ResumeAfterMetered,
+		meteredPaused:      make(map[model.DownloadID]struct{}),
 	}
 	service.waitGroup.Add(1)
 	go service.runScheduler()
+	if service.networkObserver != nil {
+		service.waitGroup.Add(1)
+		go service.runNetworkObserver()
+	}
 
 	return service, nil
 }
@@ -182,6 +203,7 @@ func (service *Service) pause(ctx context.Context, payload json.RawMessage) (ipc
 		return ipc.DownloadActionResponse{}, err
 	}
 	if download.Status == model.StatusPaused {
+		service.forgetMeteredPause(download.ID)
 		return actionResponse(download.ID, model.StatusPaused), nil
 	}
 	switch download.Status {
@@ -206,6 +228,7 @@ func (service *Service) pause(ctx context.Context, payload json.RawMessage) (ipc
 	}
 
 	service.cancelActive(identifier)
+	service.forgetMeteredPause(identifier)
 
 	return actionResponse(identifier, model.StatusPaused), nil
 }
@@ -237,6 +260,7 @@ func (service *Service) resume(ctx context.Context, payload json.RawMessage) (ip
 	if err := service.enqueue(ctx, identifier, download.Priority); err != nil {
 		return ipc.DownloadActionResponse{}, err
 	}
+	service.forgetMeteredPause(identifier)
 
 	return actionResponse(identifier, status), nil
 }
@@ -328,6 +352,7 @@ func (service *Service) cancelDownload(
 	}
 
 	service.cancelActive(identifier)
+	service.forgetMeteredPause(identifier)
 
 	return actionResponse(identifier, model.StatusCanceled), nil
 }
