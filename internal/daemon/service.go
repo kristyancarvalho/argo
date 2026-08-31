@@ -16,9 +16,10 @@ import (
 
 	"github.com/kristyancarvalho/argo/internal/ipc"
 	"github.com/kristyancarvalho/argo/internal/model"
+	"github.com/kristyancarvalho/argo/internal/scheduler"
 )
 
-const queueCapacity = 64
+const DefaultMaximumConcurrentDownloads = 3
 
 type Store interface {
 	CreateDownload(context.Context, model.Download) error
@@ -32,22 +33,42 @@ type DownloadEngine interface {
 	Download(context.Context, model.Download) error
 }
 
+type ServiceOptions struct {
+	MaximumConcurrentDownloads int
+}
+
 type Service struct {
-	store        Store
-	engine       DownloadEngine
-	status       *ipc.StatusHandler
-	jobs         chan model.DownloadID
-	initial      []model.DownloadID
-	ctx          context.Context
-	cancel       context.CancelFunc
-	waitGroup    sync.WaitGroup
-	closeOnce    sync.Once
-	activeMutex  sync.Mutex
-	activeID     model.DownloadID
-	activeCancel context.CancelFunc
+	store         Store
+	engine        DownloadEngine
+	status        *ipc.StatusHandler
+	jobs          chan model.DownloadID
+	completed     chan model.DownloadID
+	initial       []model.DownloadID
+	maximumActive int
+	ctx           context.Context
+	cancel        context.CancelFunc
+	waitGroup     sync.WaitGroup
+	closeOnce     sync.Once
+	activeMutex   sync.Mutex
+	activeCancels map[model.DownloadID]context.CancelFunc
 }
 
 func NewService(parent context.Context, store Store, engine DownloadEngine) (*Service, error) {
+	return NewServiceWithOptions(parent, store, engine, ServiceOptions{})
+}
+
+func NewServiceWithOptions(
+	parent context.Context,
+	store Store,
+	engine DownloadEngine,
+	options ServiceOptions,
+) (*Service, error) {
+	if options.MaximumConcurrentDownloads == 0 {
+		options.MaximumConcurrentDownloads = DefaultMaximumConcurrentDownloads
+	}
+	if options.MaximumConcurrentDownloads < 0 {
+		return nil, fmt.Errorf("maximum concurrent downloads must be positive")
+	}
 	if err := store.RecoverActiveDownloads(parent, time.Now().UTC()); err != nil {
 		return nil, err
 	}
@@ -64,16 +85,19 @@ func NewService(parent context.Context, store Store, engine DownloadEngine) (*Se
 
 	ctx, cancel := context.WithCancel(parent)
 	service := &Service{
-		store:   store,
-		engine:  engine,
-		status:  ipc.NewStatusHandler(),
-		jobs:    make(chan model.DownloadID, queueCapacity),
-		initial: initial,
-		ctx:     ctx,
-		cancel:  cancel,
+		store:         store,
+		engine:        engine,
+		status:        ipc.NewStatusHandler(),
+		jobs:          make(chan model.DownloadID),
+		completed:     make(chan model.DownloadID),
+		initial:       initial,
+		maximumActive: options.MaximumConcurrentDownloads,
+		ctx:           ctx,
+		cancel:        cancel,
+		activeCancels: make(map[model.DownloadID]context.CancelFunc),
 	}
 	service.waitGroup.Add(1)
-	go service.runWorker()
+	go service.runScheduler()
 
 	return service, nil
 }
@@ -170,11 +194,7 @@ func (service *Service) pause(ctx context.Context, payload json.RawMessage) (ipc
 		return ipc.DownloadActionResponse{}, err
 	}
 
-	service.activeMutex.Lock()
-	if service.activeID == identifier && service.activeCancel != nil {
-		service.activeCancel()
-	}
-	service.activeMutex.Unlock()
+	service.cancelActive(identifier)
 
 	return actionResponse(identifier, model.StatusPaused), nil
 }
@@ -266,11 +286,7 @@ func (service *Service) cancelDownload(
 		return ipc.DownloadActionResponse{}, err
 	}
 
-	service.activeMutex.Lock()
-	if service.activeID == identifier && service.activeCancel != nil {
-		service.activeCancel()
-	}
-	service.activeMutex.Unlock()
+	service.cancelActive(identifier)
 
 	return actionResponse(identifier, model.StatusCanceled), nil
 }
@@ -313,30 +329,56 @@ func (service *Service) enqueue(ctx context.Context, identifier model.DownloadID
 		return fmt.Errorf("daemon is shutting down")
 	case <-ctx.Done():
 		return ctx.Err()
-	default:
-		return QueueFullError{Capacity: queueCapacity}
 	}
 }
 
-func (service *Service) runWorker() {
+func (service *Service) runScheduler() {
 	defer service.waitGroup.Done()
-	for _, identifier := range service.initial {
-		if service.ctx.Err() != nil {
-			return
-		}
-		service.process(identifier)
-	}
+	queue := scheduler.NewQueue(service.initial)
 	for {
+		for queue.Active() < service.maximumActive {
+			identifier, available := queue.Next()
+			if !available {
+				break
+			}
+			service.start(identifier)
+		}
 		select {
 		case <-service.ctx.Done():
 			return
 		case identifier := <-service.jobs:
-			service.process(identifier)
+			queue.Enqueue(identifier)
+		case identifier := <-service.completed:
+			queue.Complete(identifier)
 		}
 	}
 }
 
-func (service *Service) process(identifier model.DownloadID) {
+func (service *Service) start(identifier model.DownloadID) {
+	downloadContext, cancel := context.WithCancel(service.ctx)
+	service.activeMutex.Lock()
+	service.activeCancels[identifier] = cancel
+	service.activeMutex.Unlock()
+	service.waitGroup.Add(1)
+	go service.process(downloadContext, identifier, cancel)
+}
+
+func (service *Service) process(
+	downloadContext context.Context,
+	identifier model.DownloadID,
+	cancel context.CancelFunc,
+) {
+	defer service.waitGroup.Done()
+	defer func() {
+		cancel()
+		service.activeMutex.Lock()
+		delete(service.activeCancels, identifier)
+		service.activeMutex.Unlock()
+		select {
+		case service.completed <- identifier:
+		case <-service.ctx.Done():
+		}
+	}()
 	download, err := service.store.Download(service.ctx, identifier)
 	if err != nil {
 		return
@@ -345,19 +387,13 @@ func (service *Service) process(identifier model.DownloadID) {
 		return
 	}
 
-	downloadContext, cancel := context.WithCancel(service.ctx)
-	service.activeMutex.Lock()
-	service.activeID = identifier
-	service.activeCancel = cancel
-	service.activeMutex.Unlock()
-
 	_ = service.engine.Download(downloadContext, download)
-	cancel()
+}
 
+func (service *Service) cancelActive(identifier model.DownloadID) {
 	service.activeMutex.Lock()
-	if service.activeID == identifier {
-		service.activeID = ""
-		service.activeCancel = nil
+	if cancel := service.activeCancels[identifier]; cancel != nil {
+		cancel()
 	}
 	service.activeMutex.Unlock()
 }
