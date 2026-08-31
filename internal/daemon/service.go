@@ -88,6 +88,12 @@ func (service *Service) Handle(ctx context.Context, request ipc.Request) (any, e
 		return service.pause(ctx, request.Payload)
 	case ipc.OperationResume:
 		return service.resume(ctx, request.Payload)
+	case ipc.OperationCancel:
+		return service.cancelDownload(ctx, request.Payload)
+	case ipc.OperationList:
+		return service.list(ctx)
+	case ipc.OperationShow:
+		return service.show(ctx, request.Payload)
 	default:
 		return nil, ipc.UnsupportedOperationError{Operation: request.Operation}
 	}
@@ -224,6 +230,81 @@ func (service *Service) actionDownload(
 	return identifier, download, nil
 }
 
+func (service *Service) cancelDownload(
+	ctx context.Context,
+	payload json.RawMessage,
+) (ipc.DownloadActionResponse, error) {
+	identifier, download, err := service.actionDownload(ctx, payload)
+	if err != nil {
+		return ipc.DownloadActionResponse{}, err
+	}
+	if download.Status == model.StatusCanceled {
+		return actionResponse(identifier, model.StatusCanceled), nil
+	}
+	switch download.Status {
+	case model.StatusQueued,
+		model.StatusResolving,
+		model.StatusDownloading,
+		model.StatusPaused,
+		model.StatusFailed:
+	case model.StatusCompleted:
+		return ipc.DownloadActionResponse{}, InvalidDownloadActionError{
+			ID:     identifier.String(),
+			Action: "cancel",
+			Status: download.Status,
+		}
+	case model.StatusCanceled:
+		return actionResponse(identifier, model.StatusCanceled), nil
+	}
+	if err := service.store.UpdateDownloadStatus(
+		ctx,
+		identifier,
+		model.StatusCanceled,
+		time.Now().UTC(),
+		"",
+	); err != nil {
+		return ipc.DownloadActionResponse{}, err
+	}
+
+	service.activeMutex.Lock()
+	if service.activeID == identifier && service.activeCancel != nil {
+		service.activeCancel()
+	}
+	service.activeMutex.Unlock()
+
+	return actionResponse(identifier, model.StatusCanceled), nil
+}
+
+func (service *Service) list(ctx context.Context) (ipc.ListResponse, error) {
+	downloads, err := service.store.Downloads(ctx)
+	if err != nil {
+		return ipc.ListResponse{}, err
+	}
+	response := ipc.ListResponse{Downloads: make([]ipc.Download, 0, len(downloads))}
+	for _, download := range downloads {
+		response.Downloads = append(response.Downloads, downloadResponse(download))
+	}
+
+	return response, nil
+}
+
+func (service *Service) show(ctx context.Context, payload json.RawMessage) (ipc.Download, error) {
+	var request ipc.ShowRequest
+	if err := decodePayload(payload, &request); err != nil {
+		return ipc.Download{}, InvalidDownloadActionError{Action: "show", Reason: err.Error()}
+	}
+	identifier, err := model.ParseDownloadID(request.ID)
+	if err != nil {
+		return ipc.Download{}, InvalidDownloadActionError{ID: request.ID, Action: "show", Reason: err.Error()}
+	}
+	download, err := service.store.Download(ctx, identifier)
+	if err != nil {
+		return ipc.Download{}, err
+	}
+
+	return downloadResponse(download), nil
+}
+
 func (service *Service) enqueue(ctx context.Context, identifier model.DownloadID) error {
 	select {
 	case service.jobs <- identifier:
@@ -297,6 +378,22 @@ func decodePayload(payload json.RawMessage, destination any) error {
 
 func actionResponse(identifier model.DownloadID, status model.Status) ipc.DownloadActionResponse {
 	return ipc.DownloadActionResponse{ID: identifier.String(), Status: string(status)}
+}
+
+func downloadResponse(download model.Download) ipc.Download {
+	return ipc.Download{
+		ID:              download.ID.String(),
+		URL:             download.URL,
+		Destination:     download.Destination,
+		Filename:        download.Filename,
+		TotalSize:       download.TotalSize,
+		DownloadedBytes: download.DownloadedBytes,
+		Status:          string(download.Status),
+		Priority:        string(download.Priority),
+		CreatedAt:       download.CreatedAt,
+		UpdatedAt:       download.UpdatedAt,
+		Error:           download.Error,
+	}
 }
 
 func newDownload(request ipc.AddRequest) (model.Download, error) {

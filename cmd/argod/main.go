@@ -3,7 +3,10 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -15,13 +18,26 @@ import (
 )
 
 func main() {
-	if err := run(); err != nil {
+	if err := run(os.Args[1:]); err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-func run() (runError error) {
+func run(arguments []string) (runError error) {
+	flags := flag.NewFlagSet("argod", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	rateLimit := flags.Int64("rate-limit", 0, "maximum download bytes per second")
+	if err := flags.Parse(arguments); err != nil {
+		return fmt.Errorf("parse daemon arguments: %w", err)
+	}
+	if flags.NArg() != 0 {
+		return fmt.Errorf("unexpected daemon arguments: %v", flags.Args())
+	}
+	if *rateLimit < 0 {
+		return fmt.Errorf("rate limit must not be negative")
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -40,7 +56,8 @@ func run() (runError error) {
 	defer func() {
 		runError = errors.Join(runError, store.Close())
 	}()
-	service, err := daemon.NewService(ctx, store, downloader.New(store))
+	engine := downloader.NewWithRateLimit(store, http.DefaultClient, *rateLimit)
+	service, err := daemon.NewService(ctx, store, engine)
 	if err != nil {
 		return err
 	}
