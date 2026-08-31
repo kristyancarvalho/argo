@@ -31,9 +31,29 @@ func run(arguments []string) (runError error) {
 	if err != nil {
 		return err
 	}
+	configuredRate, err := config.ParseRate(configuration.Download.RateLimit)
+	if err != nil {
+		return err
+	}
+	profiles := make(map[string]daemon.Profile, len(configuration.Profiles))
+	for name := range configuration.Profiles {
+		profile, err := configuration.Profile(name)
+		if err != nil {
+			return err
+		}
+		profiles[name] = daemon.Profile{
+			Name:                       profile.Name,
+			BytesPerSecond:             profile.BytesPerSecond,
+			DefaultPriority:            profile.DefaultPriority,
+			MaximumConcurrentDownloads: profile.MaxConcurrentDownloads,
+			PauseOnMetered:             profile.PauseOnMetered,
+			ResumeAfterMetered:         profile.ResumeAfterMetered,
+			Policy:                     profile.Policy,
+		}
+	}
 	flags := flag.NewFlagSet("argod", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
-	rateLimit := flags.Int64("rate-limit", 0, "maximum download bytes per second")
+	rateLimit := flags.Int64("rate-limit", configuredRate, "maximum download bytes per second")
 	maximumConcurrent := flags.Int(
 		"max-concurrent-downloads",
 		configuration.Download.MaxConcurrentDownloads,
@@ -113,6 +133,7 @@ func run(arguments []string) (runError error) {
 		PauseOnMetered:             *pauseOnMetered,
 		ResumeAfterMetered:         *resumeAfterMetered,
 		DefaultPriority:            configuration.Download.DefaultPriority,
+		Profiles:                   profiles,
 	})
 	if err != nil {
 		return err

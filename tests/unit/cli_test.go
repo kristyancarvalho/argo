@@ -81,6 +81,11 @@ func (client *cliClient) Status(context.Context) (ipc.Status, error) {
 	}, nil
 }
 
+func (client *cliClient) Profile(_ context.Context, name string) (ipc.ProfileResponse, error) {
+	client.called = "profile:" + name
+	return ipc.ProfileResponse{Name: name}, nil
+}
+
 func TestCLICommands(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -96,6 +101,7 @@ func TestCLICommands(t *testing.T) {
 		{"cancel", []string{"cancel", "download-id"}, "cancel:download-id", "download-id: canceled"},
 		{"priority", []string{"priority", "download-id", "high"}, "priority:download-id:high", "download-id: high"},
 		{"status", []string{"status"}, "status", "Daemon: running"},
+		{"profile", []string{"profile", "gaming"}, "profile:gaming", "Active profile: gaming"},
 	}
 
 	for _, test := range tests {
@@ -131,6 +137,8 @@ func TestCLIRejectsInvalidArguments(t *testing.T) {
 		{"priority", "download-id", "high", "extra"},
 		{"watch", "extra"},
 		{"status", "extra"},
+		{"profile"},
+		{"profile", "one", "two"},
 	}
 
 	for _, arguments := range tests {

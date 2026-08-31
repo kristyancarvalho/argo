@@ -35,6 +35,15 @@ type DownloadEngine interface {
 	Download(context.Context, model.Download) error
 }
 
+type DownloadRateController interface {
+	SetRateLimit(int64) error
+}
+
+type ProfileStore interface {
+	ActiveProfile(context.Context) (string, error)
+	SetActiveProfile(context.Context, string) error
+}
+
 type NetworkObserver interface {
 	Observe(context.Context, func(network.Snapshot) error) error
 }
@@ -45,6 +54,17 @@ type ServiceOptions struct {
 	PauseOnMetered             bool
 	ResumeAfterMetered         bool
 	DefaultPriority            model.Priority
+	Profiles                   map[string]Profile
+}
+
+type Profile struct {
+	Name                       string
+	BytesPerSecond             int64
+	DefaultPriority            model.Priority
+	MaximumConcurrentDownloads int
+	PauseOnMetered             bool
+	ResumeAfterMetered         bool
+	Policy                     string
 }
 
 type priorityUpdate struct {
@@ -53,12 +73,18 @@ type priorityUpdate struct {
 	completed  chan struct{}
 }
 
+type schedulerLimitUpdate struct {
+	maximum   int
+	completed chan struct{}
+}
+
 type Service struct {
 	store              Store
 	engine             DownloadEngine
 	status             *ipc.StatusHandler
 	jobs               chan scheduler.Entry
 	priorities         chan priorityUpdate
+	limits             chan schedulerLimitUpdate
 	completed          chan model.DownloadID
 	initial            []scheduler.Entry
 	maximumActive      int
@@ -74,6 +100,11 @@ type Service struct {
 	meteredMutex       sync.Mutex
 	meteredPaused      map[model.DownloadID]struct{}
 	defaultPriority    model.Priority
+	profileMutex       sync.RWMutex
+	profiles           map[string]Profile
+	activeProfile      string
+	profileStore       ProfileStore
+	rateController     DownloadRateController
 }
 
 func NewService(parent context.Context, store Store, engine DownloadEngine) (*Service, error) {
@@ -98,6 +129,51 @@ func NewServiceWithOptions(
 	if _, err := model.ParsePriority(string(options.DefaultPriority)); err != nil {
 		return nil, err
 	}
+	profiles := make(map[string]Profile, len(options.Profiles))
+	for name, profile := range options.Profiles {
+		if profile.Name == "" {
+			profile.Name = name
+		}
+		if profile.Name != name || profile.BytesPerSecond < 0 || profile.MaximumConcurrentDownloads <= 0 {
+			return nil, fmt.Errorf("invalid profile %q", name)
+		}
+		if _, err := model.ParsePriority(string(profile.DefaultPriority)); err != nil {
+			return nil, fmt.Errorf("invalid profile %q: %w", name, err)
+		}
+		if profile.ResumeAfterMetered && !profile.PauseOnMetered {
+			return nil, fmt.Errorf("invalid profile %q: resume after metered requires pause on metered", name)
+		}
+		profiles[name] = profile
+	}
+	profileStore, supportsProfiles := store.(ProfileStore)
+	rateController, controlsRate := engine.(DownloadRateController)
+	activeProfile := ""
+	if supportsProfiles {
+		var err error
+		activeProfile, err = profileStore.ActiveProfile(parent)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if activeProfile != "" {
+		profile, exists := profiles[activeProfile]
+		if !exists {
+			return nil, UnknownProfileError{Name: activeProfile}
+		}
+		if !controlsRate {
+			return nil, fmt.Errorf("download engine cannot apply profiles")
+		}
+		if err := rateController.SetRateLimit(profile.BytesPerSecond); err != nil {
+			return nil, err
+		}
+		options.MaximumConcurrentDownloads = profile.MaximumConcurrentDownloads
+		options.DefaultPriority = profile.DefaultPriority
+		options.PauseOnMetered = profile.PauseOnMetered
+		options.ResumeAfterMetered = profile.ResumeAfterMetered
+	}
+	if len(profiles) > 0 && (!supportsProfiles || !controlsRate) {
+		return nil, fmt.Errorf("service dependencies cannot apply profiles")
+	}
 	if err := store.RecoverActiveDownloads(parent, time.Now().UTC()); err != nil {
 		return nil, err
 	}
@@ -119,6 +195,7 @@ func NewServiceWithOptions(
 		status:             ipc.NewStatusHandler(),
 		jobs:               make(chan scheduler.Entry),
 		priorities:         make(chan priorityUpdate),
+		limits:             make(chan schedulerLimitUpdate),
 		completed:          make(chan model.DownloadID),
 		initial:            initial,
 		maximumActive:      options.MaximumConcurrentDownloads,
@@ -130,6 +207,10 @@ func NewServiceWithOptions(
 		resumeAfterMetered: options.ResumeAfterMetered,
 		meteredPaused:      make(map[model.DownloadID]struct{}),
 		defaultPriority:    options.DefaultPriority,
+		profiles:           profiles,
+		activeProfile:      activeProfile,
+		profileStore:       profileStore,
+		rateController:     rateController,
 	}
 	service.waitGroup.Add(1)
 	go service.runScheduler()
@@ -159,6 +240,8 @@ func (service *Service) Handle(ctx context.Context, request ipc.Request) (any, e
 		return service.list(ctx)
 	case ipc.OperationShow:
 		return service.show(ctx, request.Payload)
+	case ipc.OperationProfile:
+		return service.setProfile(ctx, request.Payload)
 	default:
 		return nil, ipc.UnsupportedOperationError{Operation: request.Operation}
 	}
@@ -179,7 +262,7 @@ func (service *Service) add(ctx context.Context, payload json.RawMessage) (ipc.A
 		return ipc.AddResponse{}, InvalidAddRequestError{Reason: err.Error()}
 	}
 
-	download, err := newDownload(request, service.defaultPriority)
+	download, err := newDownload(request, service.currentDefaultPriority())
 	if err != nil {
 		return ipc.AddResponse{}, err
 	}
@@ -441,8 +524,9 @@ func (service *Service) updateScheduledPriority(
 func (service *Service) runScheduler() {
 	defer service.waitGroup.Done()
 	queue := scheduler.NewQueue(service.initial)
+	maximumActive := service.maximumActive
 	for {
-		for queue.Active() < service.maximumActive {
+		for queue.Active() < maximumActive {
 			identifier, available := queue.Next()
 			if !available {
 				break
@@ -457,9 +541,78 @@ func (service *Service) runScheduler() {
 		case update := <-service.priorities:
 			queue.UpdatePriority(update.identifier, update.priority)
 			close(update.completed)
+		case update := <-service.limits:
+			maximumActive = update.maximum
+			close(update.completed)
 		case identifier := <-service.completed:
 			queue.Complete(identifier)
 		}
+	}
+}
+
+func (service *Service) setProfile(ctx context.Context, payload json.RawMessage) (ipc.ProfileResponse, error) {
+	var request ipc.ProfileRequest
+	if err := decodePayload(payload, &request); err != nil {
+		return ipc.ProfileResponse{}, InvalidDownloadActionError{Action: "profile", Reason: err.Error()}
+	}
+	profile, exists := service.profiles[request.Name]
+	if !exists {
+		return ipc.ProfileResponse{}, UnknownProfileError{Name: request.Name}
+	}
+	if err := service.profileStore.SetActiveProfile(ctx, profile.Name); err != nil {
+		return ipc.ProfileResponse{}, err
+	}
+	if err := service.rateController.SetRateLimit(profile.BytesPerSecond); err != nil {
+		return ipc.ProfileResponse{}, err
+	}
+	service.profileMutex.Lock()
+	service.activeProfile = profile.Name
+	service.defaultPriority = profile.DefaultPriority
+	service.pauseOnMetered = profile.PauseOnMetered
+	service.resumeAfterMetered = profile.ResumeAfterMetered
+	service.profileMutex.Unlock()
+	if err := service.updateSchedulerLimit(ctx, profile.MaximumConcurrentDownloads); err != nil {
+		return ipc.ProfileResponse{}, err
+	}
+
+	return profileResponse(profile), nil
+}
+
+func (service *Service) updateSchedulerLimit(ctx context.Context, maximum int) error {
+	update := schedulerLimitUpdate{maximum: maximum, completed: make(chan struct{})}
+	select {
+	case service.limits <- update:
+	case <-service.ctx.Done():
+		return fmt.Errorf("daemon is shutting down")
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	select {
+	case <-update.completed:
+		return nil
+	case <-service.ctx.Done():
+		return fmt.Errorf("daemon is shutting down")
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (service *Service) currentDefaultPriority() model.Priority {
+	service.profileMutex.RLock()
+	defer service.profileMutex.RUnlock()
+
+	return service.defaultPriority
+}
+
+func profileResponse(profile Profile) ipc.ProfileResponse {
+	return ipc.ProfileResponse{
+		Name:                   profile.Name,
+		BytesPerSecond:         profile.BytesPerSecond,
+		DefaultPriority:        string(profile.DefaultPriority),
+		MaxConcurrentDownloads: profile.MaximumConcurrentDownloads,
+		PauseOnMetered:         profile.PauseOnMetered,
+		ResumeAfterMetered:     profile.ResumeAfterMetered,
+		Policy:                 profile.Policy,
 	}
 }
 

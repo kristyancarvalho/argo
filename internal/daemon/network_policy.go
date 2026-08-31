@@ -14,7 +14,8 @@ func (service *Service) runNetworkObserver() {
 }
 
 func (service *Service) applyNetworkState(snapshot network.Snapshot) error {
-	if !service.pauseOnMetered {
+	pauseOnMetered, _ := service.meteredPolicy()
+	if !pauseOnMetered {
 		return nil
 	}
 	if snapshot.Metered.IsMetered() {
@@ -60,7 +61,8 @@ func (service *Service) pauseForMeteredNetwork() error {
 }
 
 func (service *Service) resumeAfterMeteredNetwork() error {
-	if !service.resumeAfterMetered {
+	_, resumeAfterMetered := service.meteredPolicy()
+	if !resumeAfterMetered {
 		return nil
 	}
 	identifiers := service.meteredPauseIDs()
@@ -89,6 +91,13 @@ func (service *Service) resumeAfterMeteredNetwork() error {
 	}
 
 	return nil
+}
+
+func (service *Service) meteredPolicy() (bool, bool) {
+	service.profileMutex.RLock()
+	defer service.profileMutex.RUnlock()
+
+	return service.pauseOnMetered, service.resumeAfterMetered
 }
 
 func (service *Service) rememberMeteredPause(identifier model.DownloadID) {

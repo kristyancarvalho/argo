@@ -21,6 +21,22 @@ type controlledDownloadEngine struct {
 	started       chan model.Download
 	active        int
 	maximumActive int
+	rateLimit     int64
+}
+
+func (engine *controlledDownloadEngine) SetRateLimit(bytesPerSecond int64) error {
+	engine.mutex.Lock()
+	defer engine.mutex.Unlock()
+	engine.rateLimit = bytesPerSecond
+
+	return nil
+}
+
+func (engine *controlledDownloadEngine) currentRateLimit() int64 {
+	engine.mutex.Lock()
+	defer engine.mutex.Unlock()
+
+	return engine.rateLimit
 }
 
 func TestConcurrentSchedulerPreservesQueueOrderAndStartsNext(t *testing.T) {
