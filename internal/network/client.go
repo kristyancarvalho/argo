@@ -54,6 +54,7 @@ type PropertyReader interface {
 
 type Client struct {
 	properties PropertyReader
+	events     EventSubscriber
 	closer     io.Closer
 }
 
@@ -69,12 +70,17 @@ func ConnectSystem() (*Client, error) {
 
 	return &Client{
 		properties: &systemPropertyReader{connection: connection},
+		events:     &systemEventSubscriber{connection: connection},
 		closer:     connection,
 	}, nil
 }
 
 func NewClient(properties PropertyReader) *Client {
 	return &Client{properties: properties}
+}
+
+func NewObservableClient(properties PropertyReader, events EventSubscriber) *Client {
+	return &Client{properties: properties, events: events}
 }
 
 func (client *Client) Close() error {
