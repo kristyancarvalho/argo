@@ -72,6 +72,15 @@ var migrations = []migration{
              ON download_chunks (download_id, start_byte, end_byte)`,
 		},
 	},
+	{
+		version: 5,
+		statements: []string{
+			`CREATE TABLE application_state (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )`,
+		},
+	},
 }
 
 func migrate(ctx context.Context, database *sql.DB) error {

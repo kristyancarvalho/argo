@@ -36,3 +36,15 @@ func (err InvalidDownloadActionError) Error() string {
 func (err InvalidDownloadActionError) Code() string {
 	return "invalid_request"
 }
+
+type UnknownProfileError struct {
+	Name string
+}
+
+func (err UnknownProfileError) Error() string {
+	return fmt.Sprintf("unknown profile %q", err.Name)
+}
+
+func (err UnknownProfileError) Code() string {
+	return "unknown_profile"
+}

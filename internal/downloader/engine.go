@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/kristyancarvalho/argo/internal/model"
@@ -31,7 +32,7 @@ type Engine struct {
 	httpClient *http.Client
 	store      Store
 	now        func() time.Time
-	rateLimit  int64
+	rateLimit  atomic.Int64
 	planner    ChunkPlanner
 	chunkCount int
 	observer   func(model.DownloadID, ChunkProgress)
@@ -80,15 +81,26 @@ func NewWithOptions(store Store, options Options) (*Engine, error) {
 		return nil, err
 	}
 
-	return &Engine{
+	engine := &Engine{
 		httpClient: options.HTTPClient,
 		store:      store,
 		now:        func() time.Time { return time.Now().UTC() },
-		rateLimit:  options.BytesPerSecond,
 		planner:    planner,
 		chunkCount: options.MaximumChunks,
 		observer:   options.ChunkProgress,
-	}, nil
+	}
+	engine.rateLimit.Store(options.BytesPerSecond)
+
+	return engine, nil
+}
+
+func (engine *Engine) SetRateLimit(bytesPerSecond int64) error {
+	if bytesPerSecond < 0 {
+		return fmt.Errorf("download rate limit must not be negative")
+	}
+	engine.rateLimit.Store(bytesPerSecond)
+
+	return nil
 }
 
 func (engine *Engine) Download(ctx context.Context, download model.Download) error {
@@ -225,7 +237,7 @@ func (engine *Engine) Download(ctx context.Context, download model.Download) err
 		partial,
 		response.Body,
 		offset,
-		newRateLimiter(engine.rateLimit),
+		newRateLimiter(engine.rateLimit.Load),
 	)
 	if err != nil {
 		return engine.fail(ctx, download.ID, err)
