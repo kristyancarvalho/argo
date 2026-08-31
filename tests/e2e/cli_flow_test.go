@@ -141,6 +141,13 @@ func TestCLIBasicDownloadFlow(t *testing.T) {
 	if !strings.Contains(listOutput, identifier) || !strings.Contains(listOutput, "completed") {
 		t.Fatalf("unexpected list output %q", listOutput)
 	}
+	watchOutput, err := executeCLI(ctx, argoBinary, destination, environment, "watch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(watchOutput, identifier) || !strings.Contains(watchOutput, "completed") {
+		t.Fatalf("unexpected watch output %q", watchOutput)
+	}
 	content, err := os.ReadFile(filepath.Join(destination, "cli.bin"))
 	if err != nil {
 		t.Fatal(err)

@@ -14,6 +14,7 @@ import (
 
 type cliClient struct {
 	called string
+	watch  bool
 }
 
 func (client *cliClient) Add(_ context.Context, rawURL, _ string) (ipc.AddResponse, error) {
@@ -23,10 +24,14 @@ func (client *cliClient) Add(_ context.Context, rawURL, _ string) (ipc.AddRespon
 
 func (client *cliClient) List(context.Context) ([]ipc.Download, error) {
 	client.called = "list"
+	status := "downloading"
+	if client.watch {
+		status = "completed"
+	}
 	return []ipc.Download{{
 		ID:              "download-id",
 		Filename:        "file.bin",
-		Status:          "downloading",
+		Status:          status,
 		DownloadedBytes: 5,
 		TotalSize:       10,
 	}}, nil
@@ -124,6 +129,7 @@ func TestCLIRejectsInvalidArguments(t *testing.T) {
 		{"priority"},
 		{"priority", "download-id"},
 		{"priority", "download-id", "high", "extra"},
+		{"watch", "extra"},
 		{"status", "extra"},
 	}
 
@@ -139,5 +145,19 @@ func TestCLIRejectsInvalidArguments(t *testing.T) {
 				t.Fatalf("invalid arguments called %q", client.called)
 			}
 		})
+	}
+}
+
+func TestCLIWatchCompletedDownload(t *testing.T) {
+	client := &cliClient{watch: true}
+	var output bytes.Buffer
+	if err := cli.Run(context.Background(), client, &output, []string{"watch"}); err != nil {
+		t.Fatal(err)
+	}
+	if client.called != "list" {
+		t.Fatalf("watch called %q, expected list", client.called)
+	}
+	if !strings.Contains(output.String(), "completed") || !strings.Contains(output.String(), "total 0 B/s") {
+		t.Fatalf("unexpected watch output %q", output.String())
 	}
 }
