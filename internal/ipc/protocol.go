@@ -11,13 +11,14 @@ const ProtocolVersion = 1
 type Operation string
 
 const (
-	OperationStatus Operation = "status"
-	OperationAdd    Operation = "add"
-	OperationPause  Operation = "pause"
-	OperationResume Operation = "resume"
-	OperationCancel Operation = "cancel"
-	OperationList   Operation = "list"
-	OperationShow   Operation = "show"
+	OperationStatus   Operation = "status"
+	OperationAdd      Operation = "add"
+	OperationPause    Operation = "pause"
+	OperationResume   Operation = "resume"
+	OperationCancel   Operation = "cancel"
+	OperationPriority Operation = "priority"
+	OperationList     Operation = "list"
+	OperationShow     Operation = "show"
 )
 
 type Request struct {
@@ -59,6 +60,16 @@ type DownloadActionRequest struct {
 type DownloadActionResponse struct {
 	ID     string `json:"id"`
 	Status string `json:"status"`
+}
+
+type PriorityRequest struct {
+	ID       string `json:"id"`
+	Priority string `json:"priority"`
+}
+
+type PriorityResponse struct {
+	ID       string `json:"id"`
+	Priority string `json:"priority"`
 }
 
 type ShowRequest struct {

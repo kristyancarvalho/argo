@@ -95,6 +95,68 @@ func TestConcurrentSchedulerPauseReleasesSlotAndResumeReentersQueue(t *testing.T
 	})
 }
 
+func TestConcurrentSchedulerOrdersUpdatedPrioritiesStably(t *testing.T) {
+	store := openTestStore(t)
+	engine := newControlledDownloadEngine(store, "blocker", "low", "normal", "high-one", "high-two")
+	service := newSchedulerService(t, store, engine, 1)
+	defer closeSchedulerService(t, service)
+
+	blocker := addScheduledDownload(t, service, "blocker")
+	assertStartedDownload(t, engine, blocker)
+	low := addScheduledDownload(t, service, "low")
+	normal := addScheduledDownload(t, service, "normal")
+	highOne := addScheduledDownload(t, service, "high-one")
+	highTwo := addScheduledDownload(t, service, "high-two")
+	setScheduledPriority(t, service, low, string(model.PriorityLow))
+	setScheduledPriority(t, service, highOne, string(model.PriorityHigh))
+	setScheduledPriority(t, service, highTwo, string(model.PriorityHigh))
+	setScheduledPriority(t, service, blocker, string(model.PriorityHigh))
+	persisted, err := store.Download(context.Background(), blocker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Priority != model.PriorityHigh {
+		t.Fatalf("active priority is %s, expected high", persisted.Priority)
+	}
+
+	engine.release("blocker")
+	for _, expected := range []struct {
+		identifier model.DownloadID
+		name       string
+	}{
+		{highOne, "high-one"},
+		{highTwo, "high-two"},
+		{normal, "normal"},
+		{low, "low"},
+	} {
+		assertStartedDownload(t, engine, expected.identifier)
+		engine.release(expected.name)
+	}
+}
+
+func TestConcurrentSchedulerRejectsInvalidPriority(t *testing.T) {
+	store := openTestStore(t)
+	engine := newControlledDownloadEngine(store, "invalid")
+	service := newSchedulerService(t, store, engine, 1)
+	defer closeSchedulerService(t, service)
+	identifier := addScheduledDownload(t, service, "invalid")
+	assertStartedDownload(t, engine, identifier)
+
+	payload, err := json.Marshal(ipc.PriorityRequest{ID: identifier.String(), Priority: "urgent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.Handle(context.Background(), ipc.Request{
+		Operation: ipc.OperationPriority,
+		Payload:   payload,
+	})
+	var priorityError model.InvalidPriorityError
+	if !errors.As(err, &priorityError) {
+		t.Fatalf("invalid priority returned %T, expected InvalidPriorityError", err)
+	}
+	engine.release("invalid")
+}
+
 func (engine *controlledDownloadEngine) Download(ctx context.Context, download model.Download) error {
 	if download.Status == model.StatusQueued {
 		if err := engine.store.UpdateDownloadStatus(
@@ -129,6 +191,30 @@ func (engine *controlledDownloadEngine) Download(ctx context.Context, download m
 			time.Now().UTC(),
 			"",
 		)
+	}
+}
+
+func setScheduledPriority(
+	t *testing.T,
+	service *daemon.Service,
+	identifier model.DownloadID,
+	priority string,
+) {
+	t.Helper()
+	payload, err := json.Marshal(ipc.PriorityRequest{ID: identifier.String(), Priority: priority})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.Handle(context.Background(), ipc.Request{
+		Operation: ipc.OperationPriority,
+		Payload:   payload,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, valid := result.(ipc.PriorityResponse)
+	if !valid || response.ID != identifier.String() || response.Priority != priority {
+		t.Fatalf("unexpected priority response: %+v", result)
 	}
 }
 

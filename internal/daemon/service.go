@@ -26,6 +26,7 @@ type Store interface {
 	Download(context.Context, model.DownloadID) (model.Download, error)
 	Downloads(context.Context) ([]model.Download, error)
 	RecoverActiveDownloads(context.Context, time.Time) error
+	UpdateDownloadPriority(context.Context, model.DownloadID, model.Priority, time.Time) error
 	UpdateDownloadStatus(context.Context, model.DownloadID, model.Status, time.Time, string) error
 }
 
@@ -37,13 +38,20 @@ type ServiceOptions struct {
 	MaximumConcurrentDownloads int
 }
 
+type priorityUpdate struct {
+	identifier model.DownloadID
+	priority   model.Priority
+	completed  chan struct{}
+}
+
 type Service struct {
 	store         Store
 	engine        DownloadEngine
 	status        *ipc.StatusHandler
-	jobs          chan model.DownloadID
+	jobs          chan scheduler.Entry
+	priorities    chan priorityUpdate
 	completed     chan model.DownloadID
-	initial       []model.DownloadID
+	initial       []scheduler.Entry
 	maximumActive int
 	ctx           context.Context
 	cancel        context.CancelFunc
@@ -76,10 +84,10 @@ func NewServiceWithOptions(
 	if err != nil {
 		return nil, err
 	}
-	initial := make([]model.DownloadID, 0)
+	initial := make([]scheduler.Entry, 0)
 	for _, download := range downloads {
 		if download.Status == model.StatusQueued {
-			initial = append(initial, download.ID)
+			initial = append(initial, scheduler.Entry{ID: download.ID, Priority: download.Priority})
 		}
 	}
 
@@ -88,7 +96,8 @@ func NewServiceWithOptions(
 		store:         store,
 		engine:        engine,
 		status:        ipc.NewStatusHandler(),
-		jobs:          make(chan model.DownloadID),
+		jobs:          make(chan scheduler.Entry),
+		priorities:    make(chan priorityUpdate),
 		completed:     make(chan model.DownloadID),
 		initial:       initial,
 		maximumActive: options.MaximumConcurrentDownloads,
@@ -114,6 +123,8 @@ func (service *Service) Handle(ctx context.Context, request ipc.Request) (any, e
 		return service.resume(ctx, request.Payload)
 	case ipc.OperationCancel:
 		return service.cancelDownload(ctx, request.Payload)
+	case ipc.OperationPriority:
+		return service.setPriority(ctx, request.Payload)
 	case ipc.OperationList:
 		return service.list(ctx)
 	case ipc.OperationShow:
@@ -145,7 +156,7 @@ func (service *Service) add(ctx context.Context, payload json.RawMessage) (ipc.A
 	if err := service.store.CreateDownload(ctx, download); err != nil {
 		return ipc.AddResponse{}, fmt.Errorf("persist added download: %w", err)
 	}
-	if err := service.enqueue(ctx, download.ID); err != nil {
+	if err := service.enqueue(ctx, download.ID, download.Priority); err != nil {
 		now := time.Now().UTC()
 		statusErr := service.store.UpdateDownloadStatus(
 			context.WithoutCancel(ctx),
@@ -223,7 +234,7 @@ func (service *Service) resume(ctx context.Context, payload json.RawMessage) (ip
 	if err := service.store.UpdateDownloadStatus(ctx, identifier, status, time.Now().UTC(), ""); err != nil {
 		return ipc.DownloadActionResponse{}, err
 	}
-	if err := service.enqueue(ctx, identifier); err != nil {
+	if err := service.enqueue(ctx, identifier, download.Priority); err != nil {
 		return ipc.DownloadActionResponse{}, err
 	}
 
@@ -248,6 +259,36 @@ func (service *Service) actionDownload(
 	}
 
 	return identifier, download, nil
+}
+
+func (service *Service) setPriority(
+	ctx context.Context,
+	payload json.RawMessage,
+) (ipc.PriorityResponse, error) {
+	var request ipc.PriorityRequest
+	if err := decodePayload(payload, &request); err != nil {
+		return ipc.PriorityResponse{}, InvalidDownloadActionError{Action: "priority", Reason: err.Error()}
+	}
+	identifier, err := model.ParseDownloadID(request.ID)
+	if err != nil {
+		return ipc.PriorityResponse{}, InvalidDownloadActionError{
+			ID:     request.ID,
+			Action: "priority",
+			Reason: err.Error(),
+		}
+	}
+	priority, err := model.ParsePriority(request.Priority)
+	if err != nil {
+		return ipc.PriorityResponse{}, err
+	}
+	if err := service.store.UpdateDownloadPriority(ctx, identifier, priority, time.Now().UTC()); err != nil {
+		return ipc.PriorityResponse{}, err
+	}
+	if err := service.updateScheduledPriority(ctx, identifier, priority); err != nil {
+		return ipc.PriorityResponse{}, err
+	}
+
+	return ipc.PriorityResponse{ID: identifier.String(), Priority: string(priority)}, nil
 }
 
 func (service *Service) cancelDownload(
@@ -321,9 +362,40 @@ func (service *Service) show(ctx context.Context, payload json.RawMessage) (ipc.
 	return downloadResponse(download), nil
 }
 
-func (service *Service) enqueue(ctx context.Context, identifier model.DownloadID) error {
+func (service *Service) enqueue(
+	ctx context.Context,
+	identifier model.DownloadID,
+	priority model.Priority,
+) error {
 	select {
-	case service.jobs <- identifier:
+	case service.jobs <- scheduler.Entry{ID: identifier, Priority: priority}:
+		return nil
+	case <-service.ctx.Done():
+		return fmt.Errorf("daemon is shutting down")
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (service *Service) updateScheduledPriority(
+	ctx context.Context,
+	identifier model.DownloadID,
+	priority model.Priority,
+) error {
+	update := priorityUpdate{
+		identifier: identifier,
+		priority:   priority,
+		completed:  make(chan struct{}),
+	}
+	select {
+	case service.priorities <- update:
+	case <-service.ctx.Done():
+		return fmt.Errorf("daemon is shutting down")
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	select {
+	case <-update.completed:
 		return nil
 	case <-service.ctx.Done():
 		return fmt.Errorf("daemon is shutting down")
@@ -346,8 +418,11 @@ func (service *Service) runScheduler() {
 		select {
 		case <-service.ctx.Done():
 			return
-		case identifier := <-service.jobs:
-			queue.Enqueue(identifier)
+		case entry := <-service.jobs:
+			queue.Enqueue(entry)
+		case update := <-service.priorities:
+			queue.UpdatePriority(update.identifier, update.priority)
+			close(update.completed)
 		case identifier := <-service.completed:
 			queue.Complete(identifier)
 		}
