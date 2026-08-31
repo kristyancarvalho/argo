@@ -18,6 +18,10 @@ import (
 const copyBufferSize = 32 * 1024
 
 type Store interface {
+	DownloadChunks(context.Context, model.DownloadID) ([]model.DownloadChunk, error)
+	ReplaceDownloadChunks(context.Context, model.DownloadID, []model.DownloadChunk, time.Time) error
+	ResetDownloadProgress(context.Context, model.DownloadID, time.Time) error
+	UpdateChunkProgress(context.Context, model.DownloadID, int, int64, time.Time) error
 	UpdateDownloadProgress(context.Context, model.DownloadID, int64, time.Time) error
 	UpdateRemoteMetadata(context.Context, model.DownloadID, int64, bool, string, string, time.Time) error
 	UpdateDownloadStatus(context.Context, model.DownloadID, model.Status, time.Time, string) error
@@ -111,6 +115,9 @@ func (engine *Engine) Download(ctx context.Context, download model.Download) err
 	}
 	metadata, err := NewInspector(engine.httpClient).Inspect(ctx, download.URL)
 	if err != nil {
+		return engine.fail(ctx, download.ID, err)
+	}
+	if err := engine.prepareResumeState(ctx, &download, metadata); err != nil {
 		return engine.fail(ctx, download.ID, err)
 	}
 	if err := engine.store.UpdateRemoteMetadata(

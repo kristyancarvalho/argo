@@ -141,6 +141,8 @@ func rangeFixtureServer(t *testing.T, payload []byte) (*httptest.Server, *atomic
 	t.Helper()
 	var rangeRequests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("ETag", `"recovery-v1"`)
+		response.Header().Set("Last-Modified", "Mon, 31 Aug 2026 12:00:00 GMT")
 		offset := int64(0)
 		lastByte := int64(len(payload) - 1)
 		if rangeHeader := request.Header.Get("Range"); rangeHeader != "" {

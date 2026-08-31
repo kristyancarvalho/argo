@@ -29,8 +29,8 @@ func TestFreshDatabaseCreation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if version != 3 {
-		t.Fatalf("schema version is %d, expected 3", version)
+	if version != 4 {
+		t.Fatalf("schema version is %d, expected 4", version)
 	}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -89,8 +89,8 @@ func TestDatabaseMigration(t *testing.T) {
 	if err := database.QueryRow("SELECT MAX(version) FROM schema_migrations").Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 3 {
-		t.Fatalf("schema version is %d, expected 3", version)
+	if version != 4 {
+		t.Fatalf("schema version is %d, expected 4", version)
 	}
 	var indexName string
 	if err := database.QueryRow(
@@ -185,6 +185,51 @@ func TestDownloadRestorationAfterRestart(t *testing.T) {
 		t.Fatalf("restored %d downloads, expected 1", len(downloads))
 	}
 	assertDownloadEqual(t, downloads[0], download)
+}
+
+func TestChunkProgressRestorationAfterRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "argo.db")
+	first, err := storage.Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	download := testDownload(t, time.Date(2026, 8, 31, 14, 0, 0, 0, time.UTC))
+	if err := first.CreateDownload(context.Background(), download); err != nil {
+		t.Fatal(err)
+	}
+	chunks := []model.DownloadChunk{
+		{DownloadID: download.ID, Index: 0, Start: 0, End: 511, DownloadedBytes: 128},
+		{DownloadID: download.ID, Index: 1, Start: 512, End: 1023},
+	}
+	if err := first.ReplaceDownloadChunks(context.Background(), download.ID, chunks, download.UpdatedAt); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.UpdateChunkProgress(context.Background(), download.ID, 1, 256, download.UpdatedAt); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	restarted, err := storage.Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeStore(t, restarted)
+	restored, err := restarted.DownloadChunks(context.Background(), download.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(restored) != 2 || restored[0].DownloadedBytes != 128 || restored[1].DownloadedBytes != 256 {
+		t.Fatalf("unexpected restored chunks: %+v", restored)
+	}
+	persisted, err := restarted.Download(context.Background(), download.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.DownloadedBytes != 384 {
+		t.Fatalf("aggregate progress is %d, expected 384", persisted.DownloadedBytes)
+	}
 }
 
 func TestStorageRejectsInvalidUpdates(t *testing.T) {
