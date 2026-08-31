@@ -53,6 +53,27 @@ func (client *Client) Add(ctx context.Context, rawURL, destination string) (AddR
 	return response, nil
 }
 
+func (client *Client) Pause(ctx context.Context, id string) (DownloadActionResponse, error) {
+	return client.downloadAction(ctx, OperationPause, id)
+}
+
+func (client *Client) Resume(ctx context.Context, id string) (DownloadActionResponse, error) {
+	return client.downloadAction(ctx, OperationResume, id)
+}
+
+func (client *Client) downloadAction(
+	ctx context.Context,
+	operation Operation,
+	id string,
+) (DownloadActionResponse, error) {
+	var response DownloadActionResponse
+	if err := client.Call(ctx, operation, DownloadActionRequest{ID: id}, &response); err != nil {
+		return DownloadActionResponse{}, err
+	}
+
+	return response, nil
+}
+
 func (client *Client) Call(ctx context.Context, operation Operation, payload any, result any) error {
 	requestID, err := newRequestID()
 	if err != nil {

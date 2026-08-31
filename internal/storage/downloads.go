@@ -99,6 +99,21 @@ func (store *Store) Downloads(ctx context.Context) ([]model.Download, error) {
 	return downloads, nil
 }
 
+func (store *Store) RecoverActiveDownloads(ctx context.Context, updatedAt time.Time) error {
+	_, err := store.database.ExecContext(ctx, `UPDATE downloads SET
+        status = 'queued',
+        updated_at = ?,
+        error_message = 'recovered after daemon restart'
+        WHERE status IN ('resolving', 'downloading')`,
+		formatTime(updatedAt),
+	)
+	if err != nil {
+		return fmt.Errorf("recover active downloads: %w", err)
+	}
+
+	return nil
+}
+
 func (store *Store) UpdateDownloadProgress(
 	ctx context.Context,
 	id model.DownloadID,

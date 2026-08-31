@@ -12,6 +12,8 @@ type Operation string
 const (
 	OperationStatus Operation = "status"
 	OperationAdd    Operation = "add"
+	OperationPause  Operation = "pause"
+	OperationResume Operation = "resume"
 )
 
 type Request struct {
@@ -44,6 +46,15 @@ type AddResponse struct {
 	Filename    string `json:"filename"`
 	Destination string `json:"destination"`
 	Status      string `json:"status"`
+}
+
+type DownloadActionRequest struct {
+	ID string `json:"id"`
+}
+
+type DownloadActionResponse struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
 }
 
 type RemoteError struct {

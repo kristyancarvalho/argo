@@ -24,7 +24,10 @@ func TestAddDownloadThroughDaemonIPC(t *testing.T) {
 
 	store := openTestStore(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	service := daemon.NewService(ctx, store, downloader.New(store))
+	service, err := daemon.NewService(ctx, store, downloader.New(store))
+	if err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() {
 		cancel()
 		if err := service.Close(); err != nil {
