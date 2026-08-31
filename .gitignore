@@ -1,1 +1,6 @@
-specs/
+/spec/
+/specs/
+/bin/
+*.db
+*.db-shm
+*.db-wal
