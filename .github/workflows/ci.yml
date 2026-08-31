@@ -36,4 +36,4 @@ jobs:
       - name: Race tests
         run: go test -race ./...
       - name: Build executables
-        run: go build ./cmd/argo ./cmd/argod
+        run: go build ./cmd/argo ./cmd/argod ./cmd/argo-qosd

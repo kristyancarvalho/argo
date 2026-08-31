@@ -23,9 +23,9 @@ type Intent struct {
 }
 
 type DesiredState struct {
-	Enabled   bool
-	Policy    Policy
-	Interface string
+	Enabled   bool   `json:"enabled"`
+	Policy    Policy `json:"policy"`
+	Interface string `json:"interface"`
 }
 
 func ParsePolicy(value string) (Policy, error) {
@@ -104,4 +104,8 @@ func validateInterface(name string) error {
 	}
 
 	return nil
+}
+
+func ValidateInterface(name string) error {
+	return validateInterface(name)
 }
