@@ -173,9 +173,55 @@ func TestSingleStreamDownloadHonorsCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if persisted.Status != model.StatusFailed || persisted.DownloadedBytes == 0 {
+	if persisted.Status != model.StatusDownloading || persisted.DownloadedBytes == 0 {
 		t.Fatalf("cancellation state was not persisted: %+v", persisted)
 	}
+}
+
+func TestResumeRestartsWhenServerIgnoresRange(t *testing.T) {
+	payload := []byte("complete payload from a server without range support")
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		_, _ = response.Write(payload)
+	}))
+	defer server.Close()
+
+	destination := t.TempDir()
+	store := openTestStore(t)
+	download := persistedDownload(t, store, server.URL+"/fallback.bin", destination, "fallback.bin")
+	startedAt := time.Now().UTC()
+	if err := store.UpdateDownloadStatus(
+		context.Background(),
+		download.ID,
+		model.StatusDownloading,
+		startedAt,
+		"",
+	); err != nil {
+		t.Fatal(err)
+	}
+	partialContent := []byte("stale")
+	if err := os.WriteFile(
+		filepath.Join(destination, ".argo-"+download.ID.String()+".part"),
+		partialContent,
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpdateDownloadProgress(
+		context.Background(),
+		download.ID,
+		int64(len(partialContent)),
+		startedAt,
+	); err != nil {
+		t.Fatal(err)
+	}
+	download, err := store.Download(context.Background(), download.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := downloader.New(store).Download(context.Background(), download); err != nil {
+		t.Fatal(err)
+	}
+	assertCompletedDownload(t, store, download, payload)
 }
 
 func persistedDownload(

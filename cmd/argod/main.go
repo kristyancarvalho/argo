@@ -40,7 +40,10 @@ func run() (runError error) {
 	defer func() {
 		runError = errors.Join(runError, store.Close())
 	}()
-	service := daemon.NewService(ctx, store, downloader.New(store))
+	service, err := daemon.NewService(ctx, store, downloader.New(store))
+	if err != nil {
+		return err
+	}
 	defer func() {
 		runError = errors.Join(runError, service.Close())
 	}()

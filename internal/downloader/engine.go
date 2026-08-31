@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kristyancarvalho/argo/internal/model"
@@ -40,19 +42,44 @@ func NewWithHTTPClient(store Store, httpClient *http.Client) *Engine {
 }
 
 func (engine *Engine) Download(ctx context.Context, download model.Download) error {
-	if err := engine.store.UpdateDownloadStatus(
-		ctx,
-		download.ID,
-		model.StatusResolving,
-		engine.now(),
-		"",
-	); err != nil {
-		return err
+	resolving := false
+	switch download.Status {
+	case model.StatusQueued:
+		if err := engine.store.UpdateDownloadStatus(
+			ctx,
+			download.ID,
+			model.StatusResolving,
+			engine.now(),
+			"",
+		); err != nil {
+			return err
+		}
+		resolving = true
+	case model.StatusDownloading:
+	case model.StatusResolving,
+		model.StatusPaused,
+		model.StatusCompleted,
+		model.StatusFailed,
+		model.StatusCanceled:
+		return fmt.Errorf("download %s cannot start from status %s", download.ID, download.Status)
+	}
+
+	offset, finalPath, err := engine.preparePaths(download)
+	if err != nil {
+		return engine.fail(ctx, download.ID, err)
+	}
+	if offset != download.DownloadedBytes {
+		if err := engine.store.UpdateDownloadProgress(ctx, download.ID, offset, engine.now()); err != nil {
+			return engine.fail(ctx, download.ID, err)
+		}
 	}
 
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, download.URL, nil)
 	if err != nil {
 		return engine.fail(ctx, download.ID, fmt.Errorf("create HTTP request: %w", err))
+	}
+	if offset > 0 {
+		request.Header.Set("Range", fmt.Sprintf("bytes=%d-", offset))
 	}
 	response, err := engine.httpClient.Do(request)
 	if err != nil {
@@ -61,26 +88,21 @@ func (engine *Engine) Download(ctx context.Context, download model.Download) err
 	defer func() {
 		_ = response.Body.Close()
 	}()
-	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return engine.fail(ctx, download.ID, HTTPStatusError{
-			StatusCode: response.StatusCode,
-			Status:     response.Status,
-		})
+
+	responseOffset, totalSize, err := resolveResponse(response, offset)
+	if err != nil {
+		return engine.fail(ctx, download.ID, err)
+	}
+	if responseOffset != offset {
+		offset = responseOffset
+		if err := engine.store.UpdateDownloadProgress(ctx, download.ID, offset, engine.now()); err != nil {
+			return engine.fail(ctx, download.ID, err)
+		}
 	}
 
-	if err := os.MkdirAll(download.Destination, 0o755); err != nil {
-		return engine.fail(ctx, download.ID, fmt.Errorf("create destination directory: %w", err))
-	}
-	finalPath := filepath.Join(download.Destination, download.Filename)
-	if _, err := os.Stat(finalPath); err == nil {
-		return engine.fail(ctx, download.ID, DestinationExistsError{Path: finalPath})
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return engine.fail(ctx, download.ID, fmt.Errorf("inspect destination file: %w", err))
-	}
-	partialPath := partialPath(download)
-	partial, err := os.OpenFile(partialPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	partial, err := openPartial(partialPath(download), offset)
 	if err != nil {
-		return engine.fail(ctx, download.ID, fmt.Errorf("create partial file: %w", err))
+		return engine.fail(ctx, download.ID, err)
 	}
 	partialOpen := true
 	defer func() {
@@ -93,26 +115,31 @@ func (engine *Engine) Download(ctx context.Context, download model.Download) err
 		ctx,
 		download.ID,
 		download.Filename,
-		response.ContentLength,
+		totalSize,
 		engine.now(),
 	); err != nil {
 		return engine.fail(ctx, download.ID, err)
 	}
-	if err := engine.store.UpdateDownloadStatus(
-		ctx,
-		download.ID,
-		model.StatusDownloading,
-		engine.now(),
-		"",
-	); err != nil {
-		return engine.fail(ctx, download.ID, err)
+	if resolving {
+		if err := engine.store.UpdateDownloadStatus(
+			ctx,
+			download.ID,
+			model.StatusDownloading,
+			engine.now(),
+			"",
+		); err != nil {
+			return engine.fail(ctx, download.ID, err)
+		}
 	}
 
-	downloaded, err := engine.copy(ctx, download.ID, partial, response.Body)
+	downloaded, err := engine.copy(ctx, download.ID, partial, response.Body, offset)
 	if err != nil {
 		return engine.fail(ctx, download.ID, err)
 	}
-	if response.ContentLength >= 0 && downloaded != response.ContentLength {
+	if response.ContentLength >= 0 && downloaded-offset != response.ContentLength {
+		return engine.fail(ctx, download.ID, io.ErrUnexpectedEOF)
+	}
+	if totalSize >= 0 && downloaded != totalSize {
 		return engine.fail(ctx, download.ID, io.ErrUnexpectedEOF)
 	}
 	if err := partial.Sync(); err != nil {
@@ -123,7 +150,7 @@ func (engine *Engine) Download(ctx context.Context, download model.Download) err
 		return engine.fail(ctx, download.ID, fmt.Errorf("close partial file: %w", err))
 	}
 	partialOpen = false
-	if err := os.Rename(partialPath, finalPath); err != nil {
+	if err := os.Rename(partialPath(download), finalPath); err != nil {
 		return engine.fail(ctx, download.ID, fmt.Errorf("finalize download: %w", err))
 	}
 	if err := engine.store.UpdateDownloadStatus(
@@ -139,14 +166,120 @@ func (engine *Engine) Download(ctx context.Context, download model.Download) err
 	return nil
 }
 
+func (engine *Engine) preparePaths(download model.Download) (int64, string, error) {
+	if err := os.MkdirAll(download.Destination, 0o755); err != nil {
+		return 0, "", fmt.Errorf("create destination directory: %w", err)
+	}
+	finalPath := filepath.Join(download.Destination, download.Filename)
+	if _, err := os.Stat(finalPath); err == nil {
+		return 0, "", DestinationExistsError{Path: finalPath}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return 0, "", fmt.Errorf("inspect destination file: %w", err)
+	}
+
+	partial := partialPath(download)
+	info, err := os.Stat(partial)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, finalPath, nil
+	}
+	if err != nil {
+		return 0, "", fmt.Errorf("inspect partial file: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return 0, "", fmt.Errorf("partial path is not a regular file: %s", partial)
+	}
+	if download.DownloadedBytes <= 0 || info.Size() < download.DownloadedBytes {
+		return 0, finalPath, nil
+	}
+	if info.Size() > download.DownloadedBytes {
+		if err := os.Truncate(partial, download.DownloadedBytes); err != nil {
+			return 0, "", fmt.Errorf("truncate partial file: %w", err)
+		}
+	}
+
+	return download.DownloadedBytes, finalPath, nil
+}
+
+func openPartial(path string, offset int64) (*os.File, error) {
+	flags := os.O_CREATE | os.O_WRONLY
+	if offset == 0 {
+		flags |= os.O_TRUNC
+	}
+	file, err := os.OpenFile(path, flags, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open partial file: %w", err)
+	}
+	if _, err := file.Seek(offset, io.SeekStart); err != nil {
+		closeErr := file.Close()
+		return nil, errors.Join(fmt.Errorf("seek partial file: %w", err), closeErr)
+	}
+
+	return file, nil
+}
+
+func resolveResponse(response *http.Response, requestedOffset int64) (int64, int64, error) {
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return 0, 0, HTTPStatusError{StatusCode: response.StatusCode, Status: response.Status}
+	}
+	if response.StatusCode == http.StatusPartialContent {
+		start, _, total, err := parseContentRange(response.Header.Get("Content-Range"))
+		if err != nil {
+			return 0, 0, err
+		}
+		if start != requestedOffset {
+			return 0, 0, fmt.Errorf("range response starts at %d instead of %d", start, requestedOffset)
+		}
+		return requestedOffset, total, nil
+	}
+	if requestedOffset > 0 {
+		return 0, response.ContentLength, nil
+	}
+
+	return 0, response.ContentLength, nil
+}
+
+func parseContentRange(value string) (int64, int64, int64, error) {
+	if !strings.HasPrefix(value, "bytes ") {
+		return 0, 0, 0, fmt.Errorf("invalid Content-Range %q", value)
+	}
+	parts := strings.Split(strings.TrimPrefix(value, "bytes "), "/")
+	if len(parts) != 2 {
+		return 0, 0, 0, fmt.Errorf("invalid Content-Range %q", value)
+	}
+	bounds := strings.Split(parts[0], "-")
+	if len(bounds) != 2 {
+		return 0, 0, 0, fmt.Errorf("invalid Content-Range %q", value)
+	}
+	start, err := strconv.ParseInt(bounds[0], 10, 64)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("invalid Content-Range start %q: %w", bounds[0], err)
+	}
+	end, err := strconv.ParseInt(bounds[1], 10, 64)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("invalid Content-Range end %q: %w", bounds[1], err)
+	}
+	total := int64(-1)
+	if parts[1] != "*" {
+		total, err = strconv.ParseInt(parts[1], 10, 64)
+		if err != nil {
+			return 0, 0, 0, fmt.Errorf("invalid Content-Range total %q: %w", parts[1], err)
+		}
+	}
+	if start < 0 || end < start || (total >= 0 && end >= total) {
+		return 0, 0, 0, fmt.Errorf("invalid Content-Range bounds %q", value)
+	}
+
+	return start, end, total, nil
+}
+
 func (engine *Engine) copy(
 	ctx context.Context,
 	id model.DownloadID,
 	destination io.Writer,
 	source io.Reader,
+	downloaded int64,
 ) (int64, error) {
 	buffer := make([]byte, copyBufferSize)
-	var downloaded int64
 	for {
 		if err := ctx.Err(); err != nil {
 			return downloaded, err
@@ -175,8 +308,10 @@ func (engine *Engine) copy(
 }
 
 func (engine *Engine) fail(ctx context.Context, id model.DownloadID, downloadError error) error {
-	statusContext := context.WithoutCancel(ctx)
-	statusContext, cancel := context.WithTimeout(statusContext, 5*time.Second)
+	if ctx.Err() != nil {
+		return downloadError
+	}
+	statusContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := engine.store.UpdateDownloadStatus(
 		statusContext,

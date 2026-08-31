@@ -59,10 +59,12 @@ var transitions = map[Status]map[Status]struct{}{
 	StatusQueued: {
 		StatusResolving:   {},
 		StatusDownloading: {},
+		StatusPaused:      {},
 		StatusCanceled:    {},
 	},
 	StatusResolving: {
 		StatusDownloading: {},
+		StatusPaused:      {},
 		StatusFailed:      {},
 		StatusCanceled:    {},
 	},

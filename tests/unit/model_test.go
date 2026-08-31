@@ -14,8 +14,10 @@ func TestValidDownloadTransitions(t *testing.T) {
 	}{
 		{model.StatusQueued, model.StatusResolving},
 		{model.StatusQueued, model.StatusDownloading},
+		{model.StatusQueued, model.StatusPaused},
 		{model.StatusQueued, model.StatusCanceled},
 		{model.StatusResolving, model.StatusDownloading},
+		{model.StatusResolving, model.StatusPaused},
 		{model.StatusResolving, model.StatusFailed},
 		{model.StatusResolving, model.StatusCanceled},
 		{model.StatusDownloading, model.StatusPaused},
@@ -50,8 +52,10 @@ func TestInvalidDownloadTransitions(t *testing.T) {
 	valid := map[[2]model.Status]struct{}{
 		{model.StatusQueued, model.StatusResolving}:      {},
 		{model.StatusQueued, model.StatusDownloading}:    {},
+		{model.StatusQueued, model.StatusPaused}:         {},
 		{model.StatusQueued, model.StatusCanceled}:       {},
 		{model.StatusResolving, model.StatusDownloading}: {},
+		{model.StatusResolving, model.StatusPaused}:      {},
 		{model.StatusResolving, model.StatusFailed}:      {},
 		{model.StatusResolving, model.StatusCanceled}:    {},
 		{model.StatusDownloading, model.StatusPaused}:    {},

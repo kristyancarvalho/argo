@@ -1,6 +1,10 @@
 package daemon
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/kristyancarvalho/argo/internal/model"
+)
 
 type InvalidAddRequestError struct {
 	Reason string
@@ -24,4 +28,23 @@ func (err QueueFullError) Error() string {
 
 func (err QueueFullError) Code() string {
 	return "queue_full"
+}
+
+type InvalidDownloadActionError struct {
+	ID     string
+	Action string
+	Status model.Status
+	Reason string
+}
+
+func (err InvalidDownloadActionError) Error() string {
+	if err.Reason != "" {
+		return fmt.Sprintf("invalid %s request for download %q: %s", err.Action, err.ID, err.Reason)
+	}
+
+	return fmt.Sprintf("cannot %s download %q in status %q", err.Action, err.ID, err.Status)
+}
+
+func (err InvalidDownloadActionError) Code() string {
+	return "invalid_request"
 }
