@@ -65,6 +65,18 @@ func (client *Client) Cancel(ctx context.Context, id string) (DownloadActionResp
 	return client.downloadAction(ctx, OperationCancel, id)
 }
 
+func (client *Client) Priority(ctx context.Context, id, priority string) (PriorityResponse, error) {
+	var response PriorityResponse
+	if err := client.Call(ctx, OperationPriority, PriorityRequest{
+		ID:       id,
+		Priority: priority,
+	}, &response); err != nil {
+		return PriorityResponse{}, err
+	}
+
+	return response, nil
+}
+
 func (client *Client) List(ctx context.Context) ([]Download, error) {
 	var response ListResponse
 	if err := client.Call(ctx, OperationList, nil, &response); err != nil {

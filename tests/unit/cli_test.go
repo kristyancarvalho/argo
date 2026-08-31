@@ -61,6 +61,11 @@ func (client *cliClient) Cancel(_ context.Context, id string) (ipc.DownloadActio
 	return ipc.DownloadActionResponse{ID: id, Status: "canceled"}, nil
 }
 
+func (client *cliClient) Priority(_ context.Context, id, priority string) (ipc.PriorityResponse, error) {
+	client.called = "priority:" + id + ":" + priority
+	return ipc.PriorityResponse{ID: id, Priority: priority}, nil
+}
+
 func (client *cliClient) Status(context.Context) (ipc.Status, error) {
 	client.called = "status"
 	return ipc.Status{
@@ -84,6 +89,7 @@ func TestCLICommands(t *testing.T) {
 		{"pause", []string{"pause", "download-id"}, "pause:download-id", "download-id: paused"},
 		{"resume", []string{"resume", "download-id"}, "resume:download-id", "download-id: downloading"},
 		{"cancel", []string{"cancel", "download-id"}, "cancel:download-id", "download-id: canceled"},
+		{"priority", []string{"priority", "download-id", "high"}, "priority:download-id:high", "download-id: high"},
 		{"status", []string{"status"}, "status", "Daemon: running"},
 	}
 
@@ -115,6 +121,9 @@ func TestCLIRejectsInvalidArguments(t *testing.T) {
 		{"pause"},
 		{"resume"},
 		{"cancel"},
+		{"priority"},
+		{"priority", "download-id"},
+		{"priority", "download-id", "high", "extra"},
 		{"status", "extra"},
 	}
 

@@ -100,6 +100,21 @@ func TestCLIBasicDownloadFlow(t *testing.T) {
 		t.Fatalf("unexpected add output %q", addOutput)
 	}
 	identifier := fields[1]
+	priorityOutput, err := executeCLI(
+		ctx,
+		argoBinary,
+		destination,
+		environment,
+		"priority",
+		identifier,
+		"high",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(priorityOutput, identifier+": high") {
+		t.Fatalf("unexpected priority output %q", priorityOutput)
+	}
 	releaseOnce.Do(func() { close(releaseDownload) })
 
 	deadline = time.Now().Add(3 * time.Second)
@@ -108,7 +123,7 @@ func TestCLIBasicDownloadFlow(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if strings.Contains(showOutput, "Status: completed") {
+		if strings.Contains(showOutput, "Status: completed") && strings.Contains(showOutput, "Priority: high") {
 			break
 		}
 		if strings.Contains(showOutput, "Status: failed") {

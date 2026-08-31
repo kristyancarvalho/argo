@@ -158,6 +158,35 @@ func (store *Store) UpdateDownloadProgress(
 	return InvalidProgressError{Downloaded: downloaded, Total: total}
 }
 
+func (store *Store) UpdateDownloadPriority(
+	ctx context.Context,
+	id model.DownloadID,
+	priority model.Priority,
+	updatedAt time.Time,
+) error {
+	if _, err := model.ParsePriority(string(priority)); err != nil {
+		return err
+	}
+	result, err := store.database.ExecContext(ctx, `UPDATE downloads
+        SET priority = ?, updated_at = ? WHERE id = ?`,
+		string(priority),
+		formatTime(updatedAt),
+		id.String(),
+	)
+	if err != nil {
+		return fmt.Errorf("update priority for download %s: %w", id, err)
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read priority update result for download %s: %w", id, err)
+	}
+	if updated != 1 {
+		return fmt.Errorf("%w: %s", ErrDownloadNotFound, id)
+	}
+
+	return nil
+}
+
 func (store *Store) UpdateRemoteMetadata(
 	ctx context.Context,
 	id model.DownloadID,
