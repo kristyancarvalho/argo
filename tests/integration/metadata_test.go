@@ -12,6 +12,7 @@ import (
 )
 
 func TestRangeCapabilityAndValidatorsArePersisted(t *testing.T) {
+	isolateDownloadState(t)
 	payload := []byte("range-capable payload")
 	etag := `"metadata-v1"`
 	lastModified := "Mon, 31 Aug 2026 12:00:00 GMT"

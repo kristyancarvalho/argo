@@ -35,6 +35,17 @@ func run(arguments []string) (runError error) {
 	if err != nil {
 		return err
 	}
+	downloadDirectory, err := configuration.DownloadDirectory()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(downloadDirectory, 0o755); err != nil {
+		return fmt.Errorf("create download directory: %w", err)
+	}
+	partsDirectory, err := downloader.DefaultPartsDirectory()
+	if err != nil {
+		return err
+	}
 	configuredRate, err := config.ParseRate(configuration.Download.RateLimit)
 	if err != nil {
 		return err
@@ -172,6 +183,7 @@ func run(arguments []string) (runError error) {
 		HTTPClient:     http.DefaultClient,
 		BytesPerSecond: *rateLimit,
 		MaximumChunks:  *maximumChunks,
+		PartsDirectory: partsDirectory,
 	})
 	if err != nil {
 		return err
@@ -190,6 +202,7 @@ func run(arguments []string) (runError error) {
 		PauseOnMetered:             *pauseOnMetered,
 		ResumeAfterMetered:         *resumeAfterMetered,
 		DefaultPriority:            configuration.Download.DefaultPriority,
+		DefaultDestination:         downloadDirectory,
 		Profiles:                   profiles,
 		TrafficPolicy:              policy,
 		TrafficLinkRate:            uint64(configuredLinkRate),

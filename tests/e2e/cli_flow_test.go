@@ -49,8 +49,11 @@ func TestCLIBasicDownloadFlow(t *testing.T) {
 	runtimeDirectory := filepath.Join(temporaryDirectory, "runtime")
 	dataDirectory := filepath.Join(temporaryDirectory, "data")
 	configDirectory := filepath.Join(temporaryDirectory, "config")
-	destination := filepath.Join(temporaryDirectory, "downloads")
-	if err := os.MkdirAll(destination, 0o700); err != nil {
+	stateDirectory := filepath.Join(temporaryDirectory, "state")
+	homeDirectory := filepath.Join(temporaryDirectory, "home")
+	destination := filepath.Join(homeDirectory, "Downloads")
+	invocationDirectory := filepath.Join(temporaryDirectory, "invocation")
+	if err := os.MkdirAll(invocationDirectory, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(configDirectory, "argo"), 0o700); err != nil {
@@ -68,6 +71,8 @@ func TestCLIBasicDownloadFlow(t *testing.T) {
 		"XDG_RUNTIME_DIR="+runtimeDirectory,
 		"XDG_DATA_HOME="+dataDirectory,
 		"XDG_CONFIG_HOME="+configDirectory,
+		"XDG_STATE_HOME="+stateDirectory,
+		"HOME="+homeDirectory,
 	)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -87,7 +92,7 @@ func TestCLIBasicDownloadFlow(t *testing.T) {
 
 	deadline := time.Now().Add(3 * time.Second)
 	for {
-		if _, err := executeCLI(ctx, argoBinary, destination, environment, "status"); err == nil {
+		if _, err := executeCLI(ctx, argoBinary, invocationDirectory, environment, "status"); err == nil {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -95,14 +100,14 @@ func TestCLIBasicDownloadFlow(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	profileOutput, err := executeCLI(ctx, argoBinary, destination, environment, "profile", "focused")
+	profileOutput, err := executeCLI(ctx, argoBinary, invocationDirectory, environment, "profile", "focused")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(profileOutput, "Active profile: focused") || !strings.Contains(profileOutput, "Traffic policy: throughput") {
 		t.Fatalf("unexpected profile output %q", profileOutput)
 	}
-	unknownOutput, err := executeCLI(ctx, argoBinary, destination, environment, "profile", "missing")
+	unknownOutput, err := executeCLI(ctx, argoBinary, invocationDirectory, environment, "profile", "missing")
 	if err == nil || !strings.Contains(unknownOutput, "unknown profile") {
 		t.Fatalf("unknown profile returned %v: %q", err, unknownOutput)
 	}
@@ -110,7 +115,7 @@ func TestCLIBasicDownloadFlow(t *testing.T) {
 	addOutput, err := executeCLI(
 		ctx,
 		argoBinary,
-		destination,
+		invocationDirectory,
 		environment,
 		"add",
 		httpServer.URL+"/cli.bin",
@@ -126,7 +131,7 @@ func TestCLIBasicDownloadFlow(t *testing.T) {
 	priorityOutput, err := executeCLI(
 		ctx,
 		argoBinary,
-		destination,
+		invocationDirectory,
 		environment,
 		"priority",
 		identifier,
@@ -142,7 +147,7 @@ func TestCLIBasicDownloadFlow(t *testing.T) {
 
 	deadline = time.Now().Add(3 * time.Second)
 	for {
-		showOutput, err := executeCLI(ctx, argoBinary, destination, environment, "show", identifier)
+		showOutput, err := executeCLI(ctx, argoBinary, invocationDirectory, environment, "show", identifier)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -157,14 +162,14 @@ func TestCLIBasicDownloadFlow(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	listOutput, err := executeCLI(ctx, argoBinary, destination, environment, "list")
+	listOutput, err := executeCLI(ctx, argoBinary, invocationDirectory, environment, "list")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(listOutput, identifier) || !strings.Contains(listOutput, "completed") {
 		t.Fatalf("unexpected list output %q", listOutput)
 	}
-	watchOutput, err := executeCLI(ctx, argoBinary, destination, environment, "watch")
+	watchOutput, err := executeCLI(ctx, argoBinary, invocationDirectory, environment, "watch")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,10 +178,18 @@ func TestCLIBasicDownloadFlow(t *testing.T) {
 	}
 	content, err := os.ReadFile(filepath.Join(destination, "cli.bin"))
 	if err != nil {
-		t.Fatal(err)
+		showOutput, showErr := executeCLI(ctx, argoBinary, invocationDirectory, environment, "show", identifier)
+		t.Fatalf("read default destination: %v; show: %v: %s", err, showErr, showOutput)
 	}
 	if string(content) != string(payload) {
 		t.Fatalf("downloaded content %q does not match %q", content, payload)
+	}
+	entries, err := os.ReadDir(invocationDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("CLI working directory contains runtime files: %v", entries)
 	}
 
 	if err := daemonCommand.Process.Signal(os.Interrupt); err != nil {

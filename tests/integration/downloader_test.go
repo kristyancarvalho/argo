@@ -17,6 +17,7 @@ import (
 )
 
 func TestSingleStreamHTTPDownloadIntegrity(t *testing.T) {
+	isolateDownloadState(t)
 	payload := []byte("argo fixture payload\nwith multiple lines\n")
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
 		_, _ = response.Write(payload)
@@ -32,6 +33,7 @@ func TestSingleStreamHTTPDownloadIntegrity(t *testing.T) {
 }
 
 func TestSingleStreamHTTPSDownload(t *testing.T) {
+	isolateDownloadState(t)
 	payload := []byte("trusted TLS fixture")
 	server := httptest.NewTLSServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
 		_, _ = response.Write(payload)
@@ -48,6 +50,7 @@ func TestSingleStreamHTTPSDownload(t *testing.T) {
 }
 
 func TestSingleStreamDownloadFollowsRedirect(t *testing.T) {
+	isolateDownloadState(t)
 	payload := []byte("redirect target")
 	mux := http.NewServeMux()
 	mux.HandleFunc("/redirect", func(response http.ResponseWriter, request *http.Request) {
@@ -68,6 +71,7 @@ func TestSingleStreamDownloadFollowsRedirect(t *testing.T) {
 }
 
 func TestSingleStreamDownloadPreservesHTTPError(t *testing.T) {
+	isolateDownloadState(t)
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
 		http.Error(response, "unavailable", http.StatusServiceUnavailable)
 	}))
@@ -93,6 +97,7 @@ func TestSingleStreamDownloadPreservesHTTPError(t *testing.T) {
 }
 
 func TestSingleStreamDownloadKeepsPartialOnInterruptedConnection(t *testing.T) {
+	parts := isolateDownloadState(t)
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
 		response.Header().Set("Content-Length", "1024")
 		_, _ = response.Write(make([]byte, 128))
@@ -112,7 +117,7 @@ func TestSingleStreamDownloadKeepsPartialOnInterruptedConnection(t *testing.T) {
 	if persisted.Status != model.StatusFailed || persisted.DownloadedBytes != 128 {
 		t.Fatalf("unexpected interrupted state: %+v", persisted)
 	}
-	partial := filepath.Join(destination, ".argo-"+download.ID.String()+".part")
+	partial := filepath.Join(parts, download.ID.String()+".part")
 	content, err := os.ReadFile(partial)
 	if err != nil {
 		t.Fatal(err)
@@ -123,6 +128,7 @@ func TestSingleStreamDownloadKeepsPartialOnInterruptedConnection(t *testing.T) {
 }
 
 func TestSingleStreamDownloadHonorsCancellation(t *testing.T) {
+	isolateDownloadState(t)
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		flusher, ok := response.(http.Flusher)
 		if !ok {
@@ -179,6 +185,7 @@ func TestSingleStreamDownloadHonorsCancellation(t *testing.T) {
 }
 
 func TestResumeRestartsWhenServerIgnoresRange(t *testing.T) {
+	isolateDownloadState(t)
 	payload := []byte("complete payload from a server without range support")
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
 		_, _ = response.Write(payload)
@@ -225,6 +232,7 @@ func TestResumeRestartsWhenServerIgnoresRange(t *testing.T) {
 }
 
 func TestSingleStreamRateLimit(t *testing.T) {
+	isolateDownloadState(t)
 	payload := make([]byte, 32*1024)
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
 		_, _ = response.Write(payload)
@@ -244,6 +252,76 @@ func TestSingleStreamRateLimit(t *testing.T) {
 	}
 	if elapsed > 2*time.Second {
 		t.Fatalf("rate-limited transfer exceeded tolerance at %s", elapsed)
+	}
+}
+
+func TestDownloadResolvesDestinationCollision(t *testing.T) {
+	isolateDownloadState(t)
+	payload := []byte("new payload")
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		_, _ = response.Write(payload)
+	}))
+	defer server.Close()
+	destination := t.TempDir()
+	original := filepath.Join(destination, "archive.iso")
+	if err := os.WriteFile(original, []byte("existing payload"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store := openTestStore(t)
+	download := persistedDownload(t, store, server.URL+"/archive.iso", destination, "archive.iso")
+	if err := downloader.New(store).Download(context.Background(), download); err != nil {
+		t.Fatal(err)
+	}
+	existing, err := os.ReadFile(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(existing) != "existing payload" {
+		t.Fatalf("existing destination was overwritten: %q", existing)
+	}
+	created, err := os.ReadFile(filepath.Join(destination, "archive (1).iso"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(created) != string(payload) {
+		t.Fatalf("collision result is %q", created)
+	}
+	persisted, err := store.Download(context.Background(), download.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Filename != "archive (1).iso" || persisted.Status != model.StatusCompleted {
+		t.Fatalf("collision metadata was not persisted: %+v", persisted)
+	}
+}
+
+func TestDownloadFinalizesAcrossFilesystemsWhenAvailable(t *testing.T) {
+	parts, err := os.MkdirTemp("/dev/shm", "argo-parts-")
+	if err != nil {
+		t.Skipf("cross-filesystem temporary directory unavailable: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(parts); err != nil {
+			t.Error(err)
+		}
+	})
+	payload := []byte("cross-filesystem payload")
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		_, _ = response.Write(payload)
+	}))
+	defer server.Close()
+	store := openTestStore(t)
+	download := persistedDownload(t, store, server.URL+"/cross.bin", t.TempDir(), "cross.bin")
+	engine, err := downloader.NewWithOptions(store, downloader.Options{PartsDirectory: parts})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.Download(context.Background(), download); err != nil {
+		t.Fatal(err)
+	}
+	assertCompletedDownload(t, store, download, payload)
+	if _, err := os.Stat(filepath.Join(parts, download.ID.String()+".part")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("cross-filesystem partial remains: %v", err)
 	}
 }
 
@@ -302,8 +380,20 @@ func assertCompletedDownload(
 		persisted.TotalSize != int64(len(payload)) {
 		t.Fatalf("unexpected completed state: %s", fmt.Sprintf("%+v", persisted))
 	}
-	partial := filepath.Join(download.Destination, ".argo-"+download.ID.String()+".part")
+	parts, err := downloader.DefaultPartsDirectory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	partial := filepath.Join(parts, download.ID.String()+".part")
 	if _, err := os.Stat(partial); !os.IsNotExist(err) {
 		t.Fatalf("partial file remains after completion: %v", err)
 	}
+}
+
+func isolateDownloadState(t *testing.T) string {
+	t.Helper()
+	state := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", state)
+
+	return filepath.Join(state, "argo", "parts")
 }

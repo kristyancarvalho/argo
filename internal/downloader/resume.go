@@ -31,7 +31,7 @@ func (engine *Engine) prepareResumeState(
 	if err := engine.store.ResetDownloadProgress(ctx, download.ID, engine.now()); err != nil {
 		return err
 	}
-	if err := os.Remove(partialPath(*download)); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := os.Remove(engine.partialPath(download.ID)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("remove stale partial file: %w", err)
 	}
 	download.DownloadedBytes = 0

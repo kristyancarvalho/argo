@@ -29,6 +29,7 @@ type runningDownloadDaemon struct {
 }
 
 func TestPauseResumeAndPausedRestartIntegrity(t *testing.T) {
+	parts := isolateDownloadState(t)
 	payload := makePayload(256 * 1024)
 	httpServer, rangeRequests := rangeFixtureServer(t, payload)
 	databasePath := filepath.Join(t.TempDir(), "argo.db")
@@ -57,7 +58,7 @@ func TestPauseResumeAndPausedRestartIntegrity(t *testing.T) {
 	pausedDownload := waitForDownload(t, firstStore, identifier, func(download model.Download) bool {
 		return download.Status == model.StatusPaused
 	})
-	partialPath := filepath.Join(destination, ".argo-"+identifier.String()+".part")
+	partialPath := filepath.Join(parts, identifier.String()+".part")
 	partialInfo, err := os.Stat(partialPath)
 	if err != nil {
 		t.Fatal(err)
@@ -96,6 +97,7 @@ func TestPauseResumeAndPausedRestartIntegrity(t *testing.T) {
 }
 
 func TestActiveDownloadRecoversAfterDaemonRestart(t *testing.T) {
+	isolateDownloadState(t)
 	payload := makePayload(256 * 1024)
 	httpServer, rangeRequests := rangeFixtureServer(t, payload)
 	databasePath := filepath.Join(t.TempDir(), "argo.db")
