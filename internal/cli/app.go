@@ -23,6 +23,13 @@ type Client interface {
 }
 
 func Run(ctx context.Context, client Client, output io.Writer, arguments []string) error {
+	return RunWithOptions(ctx, client, output, arguments, Options{})
+}
+
+func RunWithOptions(ctx context.Context, client Client, output io.Writer, arguments []string, options Options) error {
+	if options.Color {
+		output = styledWriter{output: output}
+	}
 	if len(arguments) == 0 {
 		return UsageError{Message: "command is required"}
 	}
@@ -30,6 +37,8 @@ func Run(ctx context.Context, client Client, output io.Writer, arguments []strin
 	operands := arguments[1:]
 
 	switch command {
+	case "help", "-h", "--help":
+		return runHelp(output, operands)
 	case "add":
 		return runAdd(ctx, client, output, operands)
 	case "list":
@@ -57,6 +66,45 @@ func Run(ctx context.Context, client Client, output io.Writer, arguments []strin
 	}
 }
 
+func runHelp(output io.Writer, arguments []string) error {
+	if len(arguments) != 0 {
+		return UsageError{Message: "argo help"}
+	}
+	_, err := fmt.Fprint(output, `Argo download manager and network traffic governor
+
+Usage:
+  argo <command> [arguments]
+
+Commands:
+  add <url>                         Add a download
+  list                              List downloads
+  show <id>                         Show download details
+  pause <id>                        Pause a download
+  resume <id>                       Resume a download
+  cancel <id>                       Cancel a download
+  priority <id> <low|normal|high>   Order queued Argo downloads
+  watch                             Stream download progress
+  status                            Show daemon, network, and QoS state
+  policy <name>                     Select a system traffic policy
+  profile <name>                    Activate a configured profile
+  tui                               Open the terminal interface
+  help                              Show this help
+
+Traffic policies:
+  off         Disable system traffic shaping
+  focus       Favor system responsiveness; reserve 20% for Argo
+  balanced    Split guaranteed capacity equally
+  throughput  Favor Argo downloads; reserve 80% for Argo
+  latency     Adapt the Argo limit from measured latency
+
+Priorities only order queued downloads inside Argo. Policies control how Argo
+competes with other applications and require an active download, a configured
+link rate, a connected interface, and the privileged argo-qosd helper.
+`)
+
+	return err
+}
+
 func runPolicy(ctx context.Context, client Client, output io.Writer, arguments []string) error {
 	if len(arguments) != 1 {
 		return UsageError{Message: "argo policy <off|balanced|throughput|latency|focus>"}
@@ -82,7 +130,22 @@ func runProfile(ctx context.Context, client Client, output io.Writer, arguments 
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(output, "Active profile: %s\n", profile.Name)
+	state := "inactive"
+	if profile.PolicyApplied {
+		state = "active"
+	}
+	if _, err = fmt.Fprintf(
+		output,
+		"Active profile: %s\nTraffic policy: %s (%s)\n",
+		profile.Name,
+		statusValue(profile.Policy),
+		state,
+	); err != nil {
+		return err
+	}
+	if profile.QoSError != "" {
+		_, err = fmt.Fprintf(output, "QoS warning: %s\n", profile.QoSError)
+	}
 
 	return err
 }
@@ -235,6 +298,11 @@ func runStatus(ctx context.Context, client Client, output io.Writer, arguments [
 		shaping,
 	); err != nil {
 		return err
+	}
+	if status.Traffic.Error != "" {
+		if _, err = fmt.Fprintf(output, "QoS error: %s\n", status.Traffic.Error); err != nil {
+			return err
+		}
 	}
 	if status.Traffic.CurrentRateBitsPerSecond > 0 {
 		if _, err = fmt.Fprintf(

@@ -1,8 +1,10 @@
 GO ?= go
 GOFMT ?= gofmt
 GOLANGCI_LINT ?= golangci-lint
+BIN_DIR ?= bin
+RUN_ARGS ?=
 
-.PHONY: all build check ci format format-check lint test test-e2e test-integration test-race test-unit vet
+.PHONY: all build check ci format format-check lint run test test-e2e test-integration test-race test-unit vet
 
 all: check
 
@@ -33,7 +35,13 @@ test-race:
 	$(GO) test -race ./...
 
 build:
-	$(GO) build ./cmd/argo ./cmd/argod ./cmd/argo-qosd
+	mkdir -p $(BIN_DIR)
+	$(GO) build -o $(BIN_DIR)/argo ./cmd/argo
+	$(GO) build -o $(BIN_DIR)/argod ./cmd/argod
+	$(GO) build -o $(BIN_DIR)/argo-qosd ./cmd/argo-qosd
+
+run: build
+	$(BIN_DIR)/argod $(RUN_ARGS)
 
 check: format-check vet lint test test-race build
 

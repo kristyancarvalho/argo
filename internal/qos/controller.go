@@ -54,6 +54,8 @@ func (controller *Controller) Reconcile(ctx context.Context, desired DesiredStat
 		controller.applied = false
 	}
 	if err := controller.backend.Apply(ctx, desired); err != nil {
+		controller.current = DesiredState{}
+		controller.applied = false
 		return fmt.Errorf("apply QoS state to %s: %w", desired.Interface, err)
 	}
 	controller.current = desired

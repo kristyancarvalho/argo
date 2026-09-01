@@ -129,6 +129,22 @@ func TestTUIModelRejectsMissingDependencies(t *testing.T) {
 	}
 }
 
+func TestTUIModelColorRendering(t *testing.T) {
+	model, err := tui.NewModelWithOptions(
+		context.Background(),
+		&tuiStatusClient{status: ipc.Status{State: "running"}},
+		tui.Options{Color: true},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, _ := model.Update(model.Init()())
+	view := updated.(tui.Model).View()
+	if !strings.Contains(view, "\x1b[") || !strings.Contains(view, "Argo") || !strings.Contains(view, "running") {
+		t.Fatalf("colored TUI view is incomplete: %q", view)
+	}
+}
+
 func TestTUIDownloadListEmpty(t *testing.T) {
 	model := loadTUIModel(t, &tuiStatusClient{status: ipc.Status{State: "running"}})
 	if !strings.Contains(model.View(), "No downloads.") {
@@ -228,6 +244,15 @@ func TestTUIAdaptivePolicyActive(t *testing.T) {
 		if !strings.Contains(view, value) {
 			t.Fatalf("adaptive view %q does not contain %q", view, value)
 		}
+	}
+}
+
+func TestTUIShowsQoSError(t *testing.T) {
+	model := loadTUIModel(t, &tuiStatusClient{status: ipc.Status{
+		State: "running", Traffic: ipc.TrafficStatus{Policy: "throughput", Error: "helper unavailable"},
+	}})
+	if !strings.Contains(model.View(), "QoS error: helper unavailable") {
+		t.Fatalf("QoS error is missing from TUI: %q", model.View())
 	}
 }
 

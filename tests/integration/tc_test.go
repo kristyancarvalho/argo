@@ -29,6 +29,8 @@ func (runner *recordingTcRunner) Run(_ context.Context, arguments ...string) ([]
 			return []byte("qdisc htb a400: root refcnt 2\n"), nil
 		case "unrelated":
 			return []byte("qdisc fq_codel 0: root refcnt 2\n"), nil
+		case "noqueue":
+			return []byte("qdisc noqueue 0: root refcnt 2\n"), nil
 		default:
 			return nil, nil
 		}
@@ -70,6 +72,16 @@ func TestTcBackendApplyCleanupAndConflict(t *testing.T) {
 	}
 	if runner.root != "" {
 		t.Fatal("Argo tc root remains after cleanup")
+	}
+	runner.root = "noqueue"
+	if err := backend.Apply(context.Background(), tree); err != nil {
+		t.Fatalf("kernel noqueue root was rejected: %v", err)
+	}
+	if runner.root != "argo" {
+		t.Fatal("Argo tc root did not replace noqueue")
+	}
+	if err := backend.Remove(context.Background(), "eth0"); err != nil {
+		t.Fatal(err)
 	}
 	runner.root = "unrelated"
 	err = backend.Apply(context.Background(), tree)

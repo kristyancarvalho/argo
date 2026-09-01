@@ -3,6 +3,7 @@ package integration_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 
@@ -115,6 +116,10 @@ func TestUnavailableQoSHelperDoesNotStopNetworkObservationOrDownloads(t *testing
 	observer.send(t, snapshot)
 	if backend.count() != 1 {
 		t.Fatalf("unchanged network state caused %d helper attempts", backend.count())
+	}
+	status := adaptiveServiceStatus(t, service)
+	if !strings.Contains(status.Traffic.Error, "helper unavailable") {
+		t.Fatalf("helper failure is missing from status: %+v", status.Traffic)
 	}
 	observer.send(t, network.Snapshot{})
 	download, err := store.Download(context.Background(), identifier)

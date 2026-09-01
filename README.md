@@ -51,7 +51,15 @@ max_rate = "80M"
 Configuration is loaded at daemon startup. Restart `argod` after editing the file.
 Select a configured profile at runtime with `argo profile <name>`. Select system traffic shaping with `argo policy <off|balanced|throughput|latency|focus>`. Download rates use bytes per second, while `qos.link_rate`, `min_rate`, and `max_rate` use bits per second. `K`, `M`, and `G` are decimal suffixes. Latency policy profiles can override the acceptable latency increase and rate bounds. Set `qos.probe_target` to a safe `host:port` endpoint to collect TCP-connect latency; an empty target produces missing telemetry and the bounded fallback behavior. The active profile is persisted across daemon restarts.
 
+Download priority only orders queued transfers managed by Argo. It does not shape packets or change an already active transfer. Traffic policies divide guaranteed link capacity between Argo and the default class: `focus` reserves 20% for Argo to protect system responsiveness, `balanced` reserves 50%, and `throughput` reserves 80%. Unused capacity can be borrowed by either class. `latency` adjusts Argo's limit from live latency measurements.
+
+QoS is applied only while downloads are active and requires a nonzero `qos.link_rate`, a connected interface, and the privileged `argo-qosd` service. `argo status` reports whether shaping is active and shows the latest application error. Other applications, including download managers such as FDM, remain in the default class unless they run in the exact same cgroup as `argod`; using the packaged systemd services gives `argod` its own cgroup.
+
+To verify a live setup, check `systemctl --user status argod.service`, `systemctl status argo-qosd@$(id -un).service`, and `argo status`. Kernel state is visible with `sudo tc -s class show dev <interface>` and `sudo nft list table inet argo` while an Argo download is active.
+
 Run `argo tui` for the optional terminal interface. It connects to the existing user daemon, and exiting the interface does not stop active downloads.
+
+Run `argo --help` to list commands and explain the difference between download priority and system traffic policies. Argo uses colors when writing to a terminal; set `NO_COLOR=1` to disable them.
 
 ## systemd
 
@@ -62,6 +70,8 @@ The QoS helper is a system service template. Start exactly one instance for the 
 ## Development
 
 Run the complete local CI-equivalent suite with `make check`. Individual targets include `format`, `format-check`, `vet`, `lint`, `test-unit`, `test-integration`, `test-e2e`, `test-race`, and `build`.
+
+Run `make run` to compile all executables into `bin/` and launch `argod` for local testing. Stop it with Ctrl+C. Pass daemon options with `RUN_ARGS`, for example `make run RUN_ARGS="-rate-limit 1000000"`.
 
 ## License
 

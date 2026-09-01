@@ -125,17 +125,21 @@ func (backend *Backend) Apply(ctx context.Context, tree Tree) error {
 	tree = canonical
 	backend.mutex.Lock()
 	defer backend.mutex.Unlock()
-	_, conflict, err := backend.rootState(ctx, tree.Interface)
+	owned, conflict, err := backend.rootState(ctx, tree.Interface)
 	if err != nil {
 		return err
 	}
 	if conflict {
 		return RootConflictError{Interface: tree.Interface}
 	}
-	for _, command := range tree.Commands {
+	commands := tree.Commands
+	if owned {
+		commands = commands[1:]
+	}
+	for _, command := range commands {
 		if _, err := backend.runner.Run(ctx, command.Arguments...); err != nil {
 			_, _ = backend.runner.Run(context.WithoutCancel(ctx), "qdisc", "del", "dev", tree.Interface, "root", "handle", rootHandle)
-			return fmt.Errorf("apply Argo tc tree: %w", err)
+			return fmt.Errorf("apply Argo tc tree command %q: %w", strings.Join(command.Arguments, " "), err)
 		}
 	}
 
@@ -173,6 +177,9 @@ func (backend *Backend) rootState(ctx context.Context, interfaceName string) (bo
 		}
 		if strings.Contains(line, "qdisc htb "+rootHandle) {
 			return true, false, nil
+		}
+		if strings.Contains(line, "qdisc noqueue ") {
+			return false, false, nil
 		}
 		return false, true, nil
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -87,11 +88,50 @@ func TestAdaptiveProfileSwitchReconcilesActiveDownload(t *testing.T) {
 	observer.send(t, network.Snapshot{Connected: true, Interface: "eth0"})
 	identifier := addScheduledDownload(t, service, "adaptive-profile")
 	assertStartedDownload(t, engine, identifier)
-	switchProfile(t, service, "responsive")
+	response := switchProfile(t, service, "responsive")
+	if !response.PolicyApplied || response.QoSError != "" {
+		t.Fatalf("responsive profile QoS result: %+v", response)
+	}
 	waitForTrafficPolicy(t, backend, qos.PolicyLatency, 40_000_000)
 	switchProfile(t, service, "fast")
 	waitForTrafficPolicy(t, backend, qos.PolicyLatency, 70_000_000)
 	engine.release("adaptive-profile")
+}
+
+func TestProfileSwitchReportsQoSFailure(t *testing.T) {
+	store := openTestStore(t)
+	engine := newControlledDownloadEngine(store, "profile-qos-error")
+	observer := newControlledNetworkObserver()
+	backend := &unavailableTrafficBackend{}
+	service, err := daemon.NewServiceWithOptions(context.Background(), store, engine, daemon.ServiceOptions{
+		MaximumConcurrentDownloads: 1,
+		NetworkObserver:            observer,
+		TrafficLinkRate:            100_000_000,
+		TrafficCgroupID:            42,
+		TrafficBackend:             backend,
+		Profiles: map[string]daemon.Profile{
+			"throughput": {
+				Name: "throughput", BytesPerSecond: 80_000_000, DefaultPriority: model.PriorityHigh,
+				MaximumConcurrentDownloads: 1, Policy: "throughput",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeSchedulerService(t, service)
+	observer.send(t, network.Snapshot{Connected: true, Interface: "eth0"})
+	identifier := addScheduledDownload(t, service, "profile-qos-error")
+	assertStartedDownload(t, engine, identifier)
+	response := switchProfile(t, service, "throughput")
+	if response.PolicyApplied || !strings.Contains(response.QoSError, "helper unavailable") {
+		t.Fatalf("profile hid QoS failure: %+v", response)
+	}
+	status := adaptiveServiceStatus(t, service)
+	if !strings.Contains(status.Traffic.Error, "helper unavailable") {
+		t.Fatalf("status hid QoS failure: %+v", status.Traffic)
+	}
+	engine.release("profile-qos-error")
 }
 
 func newProfileLatencyPolicy(t *testing.T, minimum, maximum uint64) *qos.LatencyPolicy {
