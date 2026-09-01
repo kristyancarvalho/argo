@@ -9,7 +9,12 @@ import (
 	"github.com/kristyancarvalho/argo/internal/ipc"
 )
 
-const DefaultWatchInterval = time.Second
+const (
+	DefaultWatchInterval = time.Second
+	DefaultETAInterval   = 3 * time.Second
+	etaSmoothingFactor   = 0.3
+	minimumETASamples    = 2
+)
 
 type WatchDownload struct {
 	ID              string   `json:"id"`
@@ -29,9 +34,10 @@ type WatchSnapshot struct {
 }
 
 type WatchOptions struct {
-	Interval time.Duration
-	Now      func() time.Time
-	Ticks    <-chan time.Time
+	Interval    time.Duration
+	ETAInterval time.Duration
+	Now         func() time.Time
+	Ticks       <-chan time.Time
 }
 
 type WatchClient interface {
@@ -43,11 +49,18 @@ type Watcher struct {
 	interval time.Duration
 	now      func() time.Time
 	ticks    <-chan time.Time
+	etaDelay time.Duration
 }
 
 type watchSample struct {
 	downloaded int64
 	timestamp  time.Time
+	status     string
+	smoothed   float64
+	samples    int
+	visibleETA float64
+	etaVisible bool
+	etaUpdated time.Time
 }
 
 func NewWatcher(client WatchClient) *Watcher {
@@ -61,13 +74,26 @@ func NewWatcherWithOptions(client WatchClient, options WatchOptions) *Watcher {
 	if options.Now == nil {
 		options.Now = func() time.Time { return time.Now().UTC() }
 	}
+	if options.ETAInterval <= 0 {
+		options.ETAInterval = DefaultETAInterval
+	}
 
 	return &Watcher{
 		client:   client,
 		interval: options.Interval,
 		now:      options.Now,
 		ticks:    options.Ticks,
+		etaDelay: options.ETAInterval,
 	}
+}
+
+func (watcher *Watcher) Snapshot(ctx context.Context) (WatchSnapshot, error) {
+	downloads, err := watcher.client.List(ctx)
+	if err != nil {
+		return WatchSnapshot{}, err
+	}
+
+	return buildWatchSnapshot(downloads, make(map[string]watchSample), watcher.now(), watcher.etaDelay), nil
 }
 
 func (watcher *Watcher) Stream(ctx context.Context, emit func(WatchSnapshot) error) error {
@@ -85,7 +111,7 @@ func (watcher *Watcher) Stream(ctx context.Context, emit func(WatchSnapshot) err
 		if err != nil {
 			return err
 		}
-		snapshot := buildWatchSnapshot(downloads, previous, timestamp)
+		snapshot := buildWatchSnapshot(downloads, previous, timestamp, watcher.etaDelay)
 		if err := emit(snapshot); err != nil {
 			return err
 		}
@@ -108,13 +134,15 @@ func buildWatchSnapshot(
 	downloads []ipc.Download,
 	previous map[string]watchSample,
 	timestamp time.Time,
+	etaDelay time.Duration,
 ) WatchSnapshot {
 	snapshot := WatchSnapshot{
 		Timestamp: timestamp,
 		Downloads: make([]WatchDownload, 0, len(downloads)),
 	}
 	for _, download := range downloads {
-		speed := downloadSpeed(download, previous[download.ID], timestamp)
+		state := previous[download.ID]
+		speed, eta, state := downloadMetrics(download, state, timestamp, etaDelay)
 		progress := WatchDownload{
 			ID:              download.ID,
 			Filename:        download.Filename,
@@ -123,17 +151,68 @@ func buildWatchSnapshot(
 			DownloadedBytes: download.DownloadedBytes,
 			TotalSize:       download.TotalSize,
 			BytesPerSecond:  speed,
-			ETASeconds:      downloadETA(download, speed),
+			ETASeconds:      eta,
 		}
 		snapshot.Downloads = append(snapshot.Downloads, progress)
 		snapshot.AggregateBytesPerSecond += speed
-		previous[download.ID] = watchSample{
-			downloaded: download.DownloadedBytes,
-			timestamp:  timestamp,
-		}
+		previous[download.ID] = state
 	}
 
 	return snapshot
+}
+
+func downloadMetrics(
+	download ipc.Download,
+	previous watchSample,
+	timestamp time.Time,
+	etaDelay time.Duration,
+) (float64, *float64, watchSample) {
+	reset := previous.timestamp.IsZero() || !timestamp.After(previous.timestamp) ||
+		download.DownloadedBytes < previous.downloaded ||
+		(previous.status != "downloading" && download.Status == "downloading")
+	if reset {
+		previous = watchSample{}
+	}
+	speed := downloadSpeed(download, previous, timestamp)
+	current := previous
+	current.downloaded = download.DownloadedBytes
+	current.timestamp = timestamp
+	current.status = download.Status
+	if download.Status == "completed" {
+		eta := float64(0)
+		current.visibleETA = eta
+		current.etaVisible = true
+		current.etaUpdated = timestamp
+
+		return speed, &eta, current
+	}
+	if download.Status != "downloading" || speed <= 0 || download.TotalSize < 0 ||
+		download.DownloadedBytes > download.TotalSize {
+		current.smoothed = 0
+		current.samples = 0
+		current.etaVisible = false
+
+		return speed, nil, current
+	}
+	if current.samples == 0 {
+		current.smoothed = speed
+	} else {
+		current.smoothed = etaSmoothingFactor*speed + (1-etaSmoothingFactor)*current.smoothed
+	}
+	current.samples++
+	if current.samples < minimumETASamples || current.smoothed <= 0 {
+		return speed, nil, current
+	}
+	remaining := download.TotalSize - download.DownloadedBytes
+	candidate := float64(remaining) / current.smoothed
+	if !current.etaVisible || timestamp.Sub(current.etaUpdated) >= etaDelay {
+		current.visibleETA = candidate
+		current.etaVisible = true
+		current.etaUpdated = timestamp
+	}
+	eta := current.visibleETA
+
+	return speed, &eta, current
 }
 
 func downloadSpeed(download ipc.Download, previous watchSample, timestamp time.Time) float64 {
@@ -144,20 +223,6 @@ func downloadSpeed(download ipc.Download, previous watchSample, timestamp time.T
 	}
 
 	return float64(delta) / elapsed
-}
-
-func downloadETA(download ipc.Download, speed float64) *float64 {
-	if download.Status == "completed" {
-		eta := float64(0)
-		return &eta
-	}
-	remaining := download.TotalSize - download.DownloadedBytes
-	if download.TotalSize < 0 || remaining < 0 || speed <= 0 {
-		return nil
-	}
-	eta := float64(remaining) / speed
-
-	return &eta
 }
 
 func allDownloadsTerminal(downloads []ipc.Download) bool {

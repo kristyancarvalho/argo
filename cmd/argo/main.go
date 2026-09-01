@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
 
 	"github.com/kristyancarvalho/argo/internal/cli"
 	"github.com/kristyancarvalho/argo/internal/console"
@@ -23,7 +24,9 @@ func run(arguments []string) error {
 		switch arguments[0] {
 		case "help", "-h", "--help":
 			return cli.RunWithOptions(
-				context.Background(), nil, os.Stdout, arguments, cli.Options{Color: console.Enabled(os.Stdout)},
+				context.Background(), nil, os.Stdout, arguments, cli.Options{
+					Color: console.Enabled(os.Stdout), Interactive: console.Terminal(os.Stdout),
+				},
 			)
 		}
 	}
@@ -32,7 +35,8 @@ func run(arguments []string) error {
 		return err
 	}
 
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
 	client := ipc.NewClient(socketPath)
 	if len(arguments) > 0 && arguments[0] == "tui" {
 		if len(arguments) != 1 {
@@ -42,5 +46,7 @@ func run(arguments []string) error {
 		return tui.Run(ctx, client, os.Stdin, os.Stdout)
 	}
 
-	return cli.RunWithOptions(ctx, client, os.Stdout, arguments, cli.Options{Color: console.Enabled(os.Stdout)})
+	return cli.RunWithOptions(ctx, client, os.Stdout, arguments, cli.Options{
+		Color: console.Enabled(os.Stdout), Interactive: console.Terminal(os.Stdout),
+	})
 }

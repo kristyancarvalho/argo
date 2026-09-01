@@ -29,6 +29,11 @@ func Enabled(output io.Writer) bool {
 	if _, disabled := os.LookupEnv("NO_COLOR"); disabled {
 		return false
 	}
+
+	return Terminal(output)
+}
+
+func Terminal(output io.Writer) bool {
 	file, valid := output.(descriptor)
 
 	return valid && term.IsTerminal(file.Fd())

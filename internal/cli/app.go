@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"text/tabwriter"
@@ -63,7 +64,7 @@ func RunWithOptions(ctx context.Context, client Client, output io.Writer, argume
 	case "priority":
 		return runPriority(ctx, client, output, operands)
 	case "watch":
-		return runWatch(ctx, client, output, operands)
+		return runWatch(ctx, client, output, operands, options.Interactive)
 	case "status":
 		return runStatus(ctx, client, output, operands)
 	case "profile":
@@ -275,14 +276,27 @@ func runAction(
 	return err
 }
 
-func runWatch(ctx context.Context, client Client, output io.Writer, arguments []string) error {
+func runWatch(ctx context.Context, client Client, output io.Writer, arguments []string, interactive bool) error {
 	if len(arguments) != 0 {
 		return UsageError{Message: "argo watch"}
 	}
 
-	return NewWatcher(client).Stream(ctx, func(snapshot WatchSnapshot) error {
+	watcher := NewWatcher(client)
+	if !interactive {
+		snapshot, err := watcher.Snapshot(ctx)
+		if err != nil {
+			return err
+		}
+
 		return renderWatchSnapshot(output, snapshot)
-	})
+	}
+	renderer := newWatchRegionRenderer(output)
+	err := watcher.Stream(ctx, renderer.Render)
+	if errors.Is(err, context.Canceled) {
+		return nil
+	}
+
+	return err
 }
 
 func runPriority(ctx context.Context, client Client, output io.Writer, arguments []string) error {
