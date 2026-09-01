@@ -13,6 +13,18 @@ type Status struct {
 	ProtocolVersion int           `json:"protocol_version"`
 	Network         NetworkStatus `json:"network"`
 	ActiveProfile   string        `json:"active_profile"`
+	Traffic         TrafficStatus `json:"traffic"`
+}
+
+type TrafficStatus struct {
+	Policy                   string        `json:"policy"`
+	Applied                  bool          `json:"applied"`
+	CurrentRateBitsPerSecond uint64        `json:"current_rate_bits_per_second"`
+	MeasuredLatency          time.Duration `json:"measured_latency"`
+	LatencyAvailable         bool          `json:"latency_available"`
+	BaselineLatency          time.Duration `json:"baseline_latency"`
+	BaselineAvailable        bool          `json:"baseline_available"`
+	ControllerState          string        `json:"controller_state"`
 }
 
 type NetworkStatus struct {

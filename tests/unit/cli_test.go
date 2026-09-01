@@ -87,6 +87,12 @@ func (client *cliClient) Status(context.Context) (ipc.Status, error) {
 			Metered:        "no",
 		},
 		ActiveProfile: "gaming",
+		Traffic: ipc.TrafficStatus{
+			Policy: "latency", Applied: true, CurrentRateBitsPerSecond: 50_000_000,
+			MeasuredLatency: 25 * time.Millisecond, LatencyAvailable: true,
+			BaselineLatency: 20 * time.Millisecond, BaselineAvailable: true,
+			ControllerState: "stable",
+		},
 	}, nil
 }
 
@@ -102,6 +108,12 @@ func TestCLIStatusShowsNetworkAndProfile(t *testing.T) {
 		"Connection type: 802-11-wireless",
 		"Metered: no",
 		"Active profile: gaming",
+		"Traffic policy: latency",
+		"QoS shaping: active",
+		"Current limit: 50000000 bit/s",
+		"Measured latency: 25ms",
+		"Baseline latency: 20ms",
+		"Controller: stable",
 	} {
 		if !strings.Contains(output.String(), value) {
 			t.Fatalf("status output %q does not contain %q", output.String(), value)

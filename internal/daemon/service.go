@@ -321,7 +321,26 @@ func (service *Service) statusResponse() ipc.Status {
 	}
 	service.profileMutex.RLock()
 	status.ActiveProfile = service.activeProfile
+	policy := service.trafficPolicy
+	latencyPolicy := service.latencyPolicy
 	service.profileMutex.RUnlock()
+	status.Traffic.Policy = string(policy)
+	if service.trafficController != nil {
+		current, applied := service.trafficController.Current()
+		status.Traffic.Applied = applied
+		if applied {
+			status.Traffic.CurrentRateBitsPerSecond = current.ArgoRateBitsPerSecond
+		}
+	}
+	if policy == qos.PolicyLatency && latencyPolicy != nil {
+		diagnostics := latencyPolicy.Diagnostics(time.Now().UTC())
+		status.Traffic.CurrentRateBitsPerSecond = diagnostics.State.RateBitsPerSecond
+		status.Traffic.MeasuredLatency = diagnostics.MeasuredLatency
+		status.Traffic.LatencyAvailable = diagnostics.LatencyAvailable
+		status.Traffic.BaselineLatency = diagnostics.BaselineLatency
+		status.Traffic.BaselineAvailable = diagnostics.BaselineAvailable
+		status.Traffic.ControllerState = string(diagnostics.State.Reason)
+	}
 
 	return status
 }
