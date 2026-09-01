@@ -16,6 +16,11 @@ const maximumFilenameRunes = 32
 type Client interface {
 	Status(context.Context) (ipc.Status, error)
 	List(context.Context) ([]ipc.Download, error)
+	Add(context.Context, string, string) (ipc.AddResponse, error)
+	Pause(context.Context, string) (ipc.DownloadActionResponse, error)
+	Resume(context.Context, string) (ipc.DownloadActionResponse, error)
+	Cancel(context.Context, string) (ipc.DownloadActionResponse, error)
+	Priority(context.Context, string, string) (ipc.PriorityResponse, error)
 }
 
 type snapshotMessage struct {
@@ -29,6 +34,19 @@ type errorMessage struct {
 }
 
 type refreshMessage struct{}
+
+type actionResultMessage struct {
+	message string
+	err     error
+}
+
+type inputMode int
+
+const (
+	inputModeNone inputMode = iota
+	inputModeAdd
+	inputModeCancel
+)
 
 type transferPoint struct {
 	bytes int64
@@ -44,6 +62,10 @@ type Model struct {
 	speeds    map[string]int64
 	previous  map[string]transferPoint
 	err       error
+	actionErr error
+	notice    string
+	input     string
+	mode      inputMode
 	ready     bool
 }
 
@@ -67,6 +89,12 @@ func (model Model) Init() tea.Cmd {
 func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch message := message.(type) {
 	case tea.KeyMsg:
+		if model.mode == inputModeAdd {
+			return model.updateAddInput(message)
+		}
+		if model.mode == inputModeCancel {
+			return model.updateCancelConfirmation(message)
+		}
 		switch message.String() {
 		case "q", "ctrl+c", "esc":
 			return model, tea.Quit
@@ -78,6 +106,27 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if model.selected+1 < len(model.downloads) {
 				model.selected++
 			}
+		case "a":
+			model.mode = inputModeAdd
+			model.input = ""
+			model.clearActionStatus()
+		case "p":
+			return model.dispatchSelected("pause")
+		case "r":
+			return model.dispatchSelected("resume")
+		case "c":
+			if !model.hasSelection() {
+				model.actionErr = fmt.Errorf("no download selected")
+				break
+			}
+			model.mode = inputModeCancel
+			model.clearActionStatus()
+		case "1":
+			return model.dispatchPriority("low")
+		case "2":
+			return model.dispatchPriority("normal")
+		case "3":
+			return model.dispatchPriority("high")
 		}
 	case snapshotMessage:
 		model.applySnapshot(message)
@@ -86,6 +135,10 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		model.err = message.err
 		model.ready = true
 		return model, refreshAfter(time.Second)
+	case actionResultMessage:
+		model.actionErr = message.err
+		model.notice = message.message
+		return model, model.loadSnapshot
 	case refreshMessage:
 		return model, model.loadSnapshot
 	}
@@ -131,9 +184,113 @@ func (model Model) View() string {
 			)
 		}
 	}
-	view.WriteString("\n↑/k ↓/j select  q quit\n")
+	if model.mode == inputModeAdd {
+		view.WriteString("\nAdd URL: ")
+		view.WriteString(model.input)
+		view.WriteString("\nEnter submit  Esc cancel\n")
+		return view.String()
+	}
+	if model.mode == inputModeCancel {
+		_, _ = fmt.Fprintf(&view, "\nCancel %s? y/N\n", model.downloads[model.selected].ID)
+		return view.String()
+	}
+	if model.actionErr != nil {
+		view.WriteString("\nAction failed: ")
+		view.WriteString(model.actionErr.Error())
+		view.WriteByte('\n')
+	} else if model.notice != "" {
+		view.WriteString("\n")
+		view.WriteString(model.notice)
+		view.WriteByte('\n')
+	}
+	view.WriteString("\n↑/k ↓/j select  a add  p pause  r resume  c cancel  1/2/3 priority  q quit\n")
 
 	return view.String()
+}
+
+func (model Model) updateAddInput(message tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch message.String() {
+	case "esc":
+		model.mode = inputModeNone
+	case "backspace", "delete":
+		runes := []rune(model.input)
+		if len(runes) > 0 {
+			model.input = string(runes[:len(runes)-1])
+		}
+	case "enter":
+		url := strings.TrimSpace(model.input)
+		if url == "" {
+			model.actionErr = fmt.Errorf("URL is required")
+			model.mode = inputModeNone
+			return model, nil
+		}
+		model.mode = inputModeNone
+		return model, func() tea.Msg {
+			response, err := model.client.Add(model.ctx, url, "")
+			return actionResultMessage{message: "Added " + response.ID, err: err}
+		}
+	default:
+		if message.Type == tea.KeyRunes {
+			model.input += string(message.Runes)
+		}
+	}
+
+	return model, nil
+}
+
+func (model Model) updateCancelConfirmation(message tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch message.String() {
+	case "y", "Y":
+		model.mode = inputModeNone
+		return model.dispatchSelected("cancel")
+	case "n", "N", "esc":
+		model.mode = inputModeNone
+	}
+
+	return model, nil
+}
+
+func (model Model) dispatchSelected(action string) (tea.Model, tea.Cmd) {
+	if !model.hasSelection() {
+		model.actionErr = fmt.Errorf("no download selected")
+		return model, nil
+	}
+	model.clearActionStatus()
+	identifier := model.downloads[model.selected].ID
+	return model, func() tea.Msg {
+		var err error
+		switch action {
+		case "pause":
+			_, err = model.client.Pause(model.ctx, identifier)
+		case "resume":
+			_, err = model.client.Resume(model.ctx, identifier)
+		case "cancel":
+			_, err = model.client.Cancel(model.ctx, identifier)
+		}
+		return actionResultMessage{message: fmt.Sprintf("%s: %s", identifier, action), err: err}
+	}
+}
+
+func (model Model) dispatchPriority(priority string) (tea.Model, tea.Cmd) {
+	if !model.hasSelection() {
+		model.actionErr = fmt.Errorf("no download selected")
+		return model, nil
+	}
+	model.clearActionStatus()
+	identifier := model.downloads[model.selected].ID
+	return model, func() tea.Msg {
+		_, err := model.client.Priority(model.ctx, identifier, priority)
+		return actionResultMessage{message: fmt.Sprintf("%s: priority %s", identifier, priority), err: err}
+	}
+}
+
+func (model Model) hasSelection() bool {
+	return model.selected >= 0 && model.selected < len(model.downloads)
+}
+
+func (model *Model) clearActionStatus() {
+	model.actionErr = nil
+	model.notice = ""
 }
 
 func (model Model) loadSnapshot() tea.Msg {
