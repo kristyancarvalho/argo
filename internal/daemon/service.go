@@ -43,6 +43,10 @@ type PartialCleaner interface {
 	RemovePartial(model.DownloadID) error
 }
 
+type CanceledResumeValidator interface {
+	ValidateCanceledResume(context.Context, model.Download) error
+}
+
 type DownloadRateController interface {
 	SetRateLimit(int64) error
 }
@@ -318,6 +322,8 @@ func (service *Service) Handle(ctx context.Context, request ipc.Request) (any, e
 		return service.remove(ctx, request.Payload)
 	case ipc.OperationClear:
 		return service.clearHistory(ctx)
+	case ipc.OperationRetry:
+		return service.retry(ctx, request.Payload)
 	default:
 		return nil, ipc.UnsupportedOperationError{Operation: request.Operation}
 	}
@@ -387,6 +393,11 @@ func (service *Service) add(ctx context.Context, payload json.RawMessage) (ipc.A
 	if err != nil {
 		return ipc.AddResponse{}, err
 	}
+
+	return service.queueDownload(ctx, download)
+}
+
+func (service *Service) queueDownload(ctx context.Context, download model.Download) (ipc.AddResponse, error) {
 	if err := service.store.CreateDownload(ctx, download); err != nil {
 		return ipc.AddResponse{}, fmt.Errorf("persist added download: %w", err)
 	}
@@ -460,9 +471,22 @@ func (service *Service) resume(ctx context.Context, payload json.RawMessage) (ip
 		status = model.StatusDownloading
 	case model.StatusFailed:
 		status = model.StatusQueued
+	case model.StatusCanceled:
+		validator, ok := service.engine.(CanceledResumeValidator)
+		if !ok {
+			return ipc.DownloadActionResponse{}, InvalidDownloadActionError{
+				ID: download.ID.String(), Action: "resume", Reason: "download engine cannot validate canceled partial data",
+			}
+		}
+		if err := validator.ValidateCanceledResume(ctx, download); err != nil {
+			return ipc.DownloadActionResponse{}, InvalidDownloadActionError{
+				ID: download.ID.String(), Action: "resume", Reason: err.Error(),
+			}
+		}
+		status = model.StatusQueued
 	case model.StatusQueued, model.StatusResolving, model.StatusDownloading:
 		return actionResponse(identifier, download.Status), nil
-	case model.StatusCompleted, model.StatusCanceled:
+	case model.StatusCompleted:
 		return ipc.DownloadActionResponse{}, InvalidDownloadActionError{
 			ID:     download.ID.String(),
 			Action: "resume",
@@ -625,6 +649,28 @@ func (service *Service) clearHistory(ctx context.Context) (ipc.ClearResponse, er
 	}
 
 	return ipc.ClearResponse{Removed: len(removed)}, nil
+}
+
+func (service *Service) retry(ctx context.Context, payload json.RawMessage) (ipc.AddResponse, error) {
+	_, original, err := service.actionDownload(ctx, payload)
+	if err != nil {
+		return ipc.AddResponse{}, err
+	}
+	switch original.Status {
+	case model.StatusCompleted, model.StatusFailed, model.StatusCanceled:
+	case model.StatusQueued, model.StatusResolving, model.StatusDownloading, model.StatusPaused:
+		return ipc.AddResponse{}, InvalidDownloadActionError{
+			ID: original.ID.String(), Action: "retry", Status: original.Status,
+		}
+	}
+	download, err := newDownload(ipc.AddRequest{
+		URL: original.URL, Destination: original.Destination,
+	}, original.Priority, service.defaultDestination)
+	if err != nil {
+		return ipc.AddResponse{}, err
+	}
+
+	return service.queueDownload(ctx, download)
 }
 
 func (service *Service) list(ctx context.Context) (ipc.ListResponse, error) {

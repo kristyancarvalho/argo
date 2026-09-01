@@ -76,6 +76,11 @@ func (client *cliClient) Clear(context.Context) (ipc.ClearResponse, error) {
 	return ipc.ClearResponse{Removed: 2}, nil
 }
 
+func (client *cliClient) Retry(_ context.Context, id string) (ipc.AddResponse, error) {
+	client.called = "retry:" + id
+	return ipc.AddResponse{ID: "retry-id", Filename: "file.bin", Status: "queued"}, nil
+}
+
 func (client *cliClient) Priority(_ context.Context, id, priority string) (ipc.PriorityResponse, error) {
 	client.called = "priority:" + id + ":" + priority
 	return ipc.PriorityResponse{ID: id, Priority: priority}, nil
@@ -200,6 +205,7 @@ func TestCLICommands(t *testing.T) {
 		{"cancel", []string{"cancel", "download-id"}, "cancel:download-id", "download-id: canceled"},
 		{"remove", []string{"remove", "download-id"}, "remove:download-id", "download-id: removed"},
 		{"clear", []string{"clear"}, "clear", "Removed 2 historical downloads"},
+		{"retry", []string{"retry", "download-id"}, "retry:download-id", "Added retry-id"},
 		{"priority", []string{"priority", "download-id", "high"}, "priority:download-id:high", "download-id: high"},
 		{"status", []string{"status"}, "status", "Daemon: running"},
 		{"profile", []string{"profile", "gaming"}, "profile:gaming", "Active profile: gaming"},
@@ -237,6 +243,7 @@ func TestCLIRejectsInvalidArguments(t *testing.T) {
 		{"cancel"},
 		{"remove"},
 		{"clear", "extra"},
+		{"retry"},
 		{"priority"},
 		{"priority", "download-id"},
 		{"priority", "download-id", "high", "extra"},
