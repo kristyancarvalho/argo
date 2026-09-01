@@ -15,9 +15,15 @@ func (service *Service) runNetworkObserver() {
 
 func (service *Service) applyNetworkState(snapshot network.Snapshot) error {
 	service.networkMutex.Lock()
+	transitioned := !service.networkAvailable ||
+		service.networkSnapshot.Connected != snapshot.Connected ||
+		service.networkSnapshot.Interface != snapshot.Interface
 	service.networkSnapshot = snapshot
 	service.networkAvailable = true
 	service.networkMutex.Unlock()
+	if transitioned {
+		_ = service.reconcileTrafficPolicy(service.ctx)
+	}
 	pauseOnMetered, _ := service.meteredPolicy()
 	if !pauseOnMetered {
 		return nil
