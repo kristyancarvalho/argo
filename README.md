@@ -63,7 +63,7 @@ The QoS helper is a system service template. Start exactly one instance for the 
 
 Run the complete local CI-equivalent suite with `make check`. Individual targets include `format`, `format-check`, `vet`, `lint`, `test-unit`, `test-integration`, `test-e2e`, `test-race`, and `build`.
 
-Run `make run` to compile all executables into `bin/` and launch `argod` for local testing. Stop it with Ctrl+C. Pass daemon options with `RUN_ARGS`, for example `make run RUN_ARGS="-config ./config.toml"`.
+Run `make run` to compile all executables into `bin/` and launch `argod` for local testing. Stop it with Ctrl+C. Pass daemon options with `RUN_ARGS`, for example `make run RUN_ARGS="-rate-limit 1000000"`.
 
 ## License
 
