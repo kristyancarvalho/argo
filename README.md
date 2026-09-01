@@ -65,6 +65,8 @@ Run `argo --help` to list commands and explain the difference between download p
 
 `argo resume <id>` continues valid partial state with the same transfer identity. `argo retry <id>` creates a new transfer from completed, failed, or canceled history, preserving the original record. Repeated URLs always create new IDs, and existing destination names receive a deterministic numeric suffix instead of being overwritten.
 
+`argo watch` redraws one live region when attached to a terminal and exits after one plain snapshot when piped or redirected. Throughput remains responsive while ETA uses smoothed samples and a three-second display debounce.
+
 ## systemd
 
 Install `packaging/systemd/argod.service` under the user unit directory and `packaging/systemd/argo-qosd@.service` under the system unit directory. Start the downloader for the current user with `systemctl --user enable --now argod.service`.

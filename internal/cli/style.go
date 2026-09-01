@@ -8,7 +8,8 @@ import (
 )
 
 type Options struct {
-	Color bool
+	Color       bool
+	Interactive bool
 }
 
 type styledWriter struct {

@@ -334,3 +334,52 @@ func TestCLIWatchCompletedDownload(t *testing.T) {
 		t.Fatalf("unexpected watch output %q", output.String())
 	}
 }
+
+type redrawWatchClient struct {
+	*cliClient
+	calls int
+}
+
+func (client *redrawWatchClient) List(context.Context) ([]ipc.Download, error) {
+	client.calls++
+	status := "downloading"
+	bytes := int64(5)
+	if client.calls > 1 {
+		status = "completed"
+		bytes = 10
+	}
+
+	return []ipc.Download{{
+		ID: "download-id", Filename: "file.bin", Status: status, DownloadedBytes: bytes, TotalSize: 10,
+	}}, nil
+}
+
+func TestCLIWatchRedrawsInteractiveRegion(t *testing.T) {
+	client := &redrawWatchClient{cliClient: &cliClient{}}
+	var output bytes.Buffer
+	if err := cli.RunWithOptions(
+		context.Background(), client, &output, []string{"watch"}, cli.Options{Interactive: true},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if client.calls != 2 {
+		t.Fatalf("interactive watch made %d list calls", client.calls)
+	}
+	if !strings.Contains(output.String(), "\x1b[") || !strings.Contains(output.String(), "\x1b[2K") {
+		t.Fatalf("interactive watch did not redraw in place: %q", output.String())
+	}
+}
+
+func TestCLIWatchNonInteractiveEmitsOnePlainSnapshot(t *testing.T) {
+	client := &redrawWatchClient{cliClient: &cliClient{}}
+	var output bytes.Buffer
+	if err := cli.Run(context.Background(), client, &output, []string{"watch"}); err != nil {
+		t.Fatal(err)
+	}
+	if client.calls != 1 {
+		t.Fatalf("non-interactive watch made %d list calls", client.calls)
+	}
+	if strings.Contains(output.String(), "\x1b[") || !strings.Contains(output.String(), "downloading") {
+		t.Fatalf("non-interactive watch output is not a plain snapshot: %q", output.String())
+	}
+}
