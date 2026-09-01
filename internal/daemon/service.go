@@ -77,6 +77,7 @@ type Profile struct {
 	PauseOnMetered             bool
 	ResumeAfterMetered         bool
 	Policy                     string
+	LatencyPolicy              *qos.LatencyPolicy
 }
 
 type priorityUpdate struct {
@@ -204,6 +205,7 @@ func NewServiceWithOptions(
 		options.PauseOnMetered = profile.PauseOnMetered
 		options.ResumeAfterMetered = profile.ResumeAfterMetered
 		options.TrafficPolicy = qos.Policy(profile.Policy)
+		options.LatencyPolicy = profile.LatencyPolicy
 	}
 	if len(profiles) > 0 && (!supportsProfiles || !controlsRate) {
 		return nil, fmt.Errorf("service dependencies cannot apply profiles")
@@ -652,6 +654,7 @@ func (service *Service) setProfile(ctx context.Context, payload json.RawMessage)
 	service.pauseOnMetered = profile.PauseOnMetered
 	service.resumeAfterMetered = profile.ResumeAfterMetered
 	service.trafficPolicy = qos.Policy(profile.Policy)
+	service.latencyPolicy = profile.LatencyPolicy
 	service.profileMutex.Unlock()
 	if err := service.updateSchedulerLimit(ctx, profile.MaximumConcurrentDownloads); err != nil {
 		return ipc.ProfileResponse{}, err

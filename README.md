@@ -31,6 +31,10 @@ resume_after_metered = false
 [qos]
 policy = "off"
 link_rate = "0"
+latency_target = "20ms"
+probe_target = ""
+probe_timeout = "1s"
+sample_interval = "1s"
 
 [profiles.gaming]
 download_limit = "30M"
@@ -39,10 +43,13 @@ max_concurrent_downloads = 2
 pause_on_metered = true
 resume_after_metered = true
 policy = "latency"
+latency_target = "15ms"
+min_rate = "10M"
+max_rate = "80M"
 ```
 
 Configuration is loaded at daemon startup. Restart `argod` after editing the file.
-Select a configured profile at runtime with `argo profile <name>`. Select system traffic shaping with `argo policy <off|balanced|throughput|latency|focus>`. Download rates use bytes per second, while `qos.link_rate` is the connection capacity in bits per second. `K`, `M`, and `G` are decimal suffixes; a positive link rate is required while shaping active downloads. The active profile is persisted across daemon restarts.
+Select a configured profile at runtime with `argo profile <name>`. Select system traffic shaping with `argo policy <off|balanced|throughput|latency|focus>`. Download rates use bytes per second, while `qos.link_rate`, `min_rate`, and `max_rate` use bits per second. `K`, `M`, and `G` are decimal suffixes. Latency policy profiles can override the acceptable latency increase and rate bounds. Set `qos.probe_target` to a safe `host:port` endpoint to collect TCP-connect latency; an empty target produces missing telemetry and the bounded fallback behavior. The active profile is persisted across daemon restarts.
 
 ## systemd
 
