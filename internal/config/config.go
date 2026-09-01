@@ -3,10 +3,12 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/kristyancarvalho/argo/internal/model"
 	"github.com/pelletier/go-toml/v2"
@@ -39,8 +41,15 @@ type Network struct {
 }
 
 type QoS struct {
-	Policy   string `toml:"policy"`
-	LinkRate string `toml:"link_rate"`
+	Policy         string `toml:"policy"`
+	LinkRate       string `toml:"link_rate"`
+	LatencyTarget  string `toml:"latency_target"`
+	MinimumRate    string `toml:"min_rate"`
+	MaximumRate    string `toml:"max_rate"`
+	ProbeTarget    string `toml:"probe_target"`
+	ProbeTimeout   string `toml:"probe_timeout"`
+	SampleInterval string `toml:"sample_interval"`
+	ManualBaseline string `toml:"manual_baseline"`
 }
 
 type Profile struct {
@@ -50,6 +59,9 @@ type Profile struct {
 	PauseOnMetered         *bool          `toml:"pause_on_metered"`
 	ResumeAfterMetered     *bool          `toml:"resume_after_metered"`
 	Policy                 string         `toml:"policy"`
+	LatencyTarget          string         `toml:"latency_target"`
+	MinimumRate            string         `toml:"min_rate"`
+	MaximumRate            string         `toml:"max_rate"`
 }
 
 type EffectiveProfile struct {
@@ -60,6 +72,19 @@ type EffectiveProfile struct {
 	PauseOnMetered         bool
 	ResumeAfterMetered     bool
 	Policy                 string
+	LatencyTarget          time.Duration
+	MinimumRate            uint64
+	MaximumRate            uint64
+}
+
+type AdaptiveSettings struct {
+	LatencyTarget  time.Duration
+	MinimumRate    uint64
+	MaximumRate    uint64
+	ProbeTarget    string
+	ProbeTimeout   time.Duration
+	SampleInterval time.Duration
+	ManualBaseline time.Duration
 }
 
 type ValidationError struct {
@@ -79,8 +104,14 @@ func Defaults() Config {
 			MaxChunksPerDownload:   defaultChunks,
 			RateLimit:              "0",
 		},
-		Network:  Network{},
-		QoS:      QoS{Policy: "off", LinkRate: "0"},
+		Network: Network{},
+		QoS: QoS{
+			Policy:         "off",
+			LinkRate:       "0",
+			LatencyTarget:  "20ms",
+			ProbeTimeout:   "1s",
+			SampleInterval: "1s",
+		},
 		Profiles: make(map[string]Profile),
 	}
 }
@@ -163,6 +194,29 @@ func (configuration Config) Validate() error {
 	if _, err := ParseRate(configuration.QoS.LinkRate); err != nil {
 		return ValidationError{Field: "qos.link_rate", Reason: err.Error()}
 	}
+	if _, err := parsePositiveDuration(configuration.QoS.LatencyTarget); err != nil {
+		return ValidationError{Field: "qos.latency_target", Reason: err.Error()}
+	}
+	if _, err := parsePositiveDuration(configuration.QoS.ProbeTimeout); err != nil {
+		return ValidationError{Field: "qos.probe_timeout", Reason: err.Error()}
+	}
+	if _, err := parsePositiveDuration(configuration.QoS.SampleInterval); err != nil {
+		return ValidationError{Field: "qos.sample_interval", Reason: err.Error()}
+	}
+	if configuration.QoS.ManualBaseline != "" {
+		if _, err := parsePositiveDuration(configuration.QoS.ManualBaseline); err != nil {
+			return ValidationError{Field: "qos.manual_baseline", Reason: err.Error()}
+		}
+	}
+	if configuration.QoS.ProbeTarget != "" {
+		host, port, err := net.SplitHostPort(configuration.QoS.ProbeTarget)
+		if err != nil || strings.TrimSpace(host) == "" || strings.TrimSpace(port) == "" {
+			return ValidationError{Field: "qos.probe_target", Reason: "must use host:port"}
+		}
+	}
+	if _, _, err := configuration.adaptiveSettings(Profile{}); err != nil {
+		return err
+	}
 	for name := range configuration.Profiles {
 		if _, err := configuration.Profile(name); err != nil {
 			return err
@@ -236,8 +290,106 @@ func (configuration Config) Profile(name string) (EffectiveProfile, error) {
 			}
 		}
 	}
+	target, rates, err := configuration.adaptiveSettings(profile)
+	if err != nil {
+		return EffectiveProfile{}, err
+	}
+	effective.LatencyTarget = target
+	effective.MinimumRate = rates[0]
+	effective.MaximumRate = rates[1]
 
 	return effective, nil
+}
+
+func (configuration Config) Adaptive() (AdaptiveSettings, error) {
+	target, rates, err := configuration.adaptiveSettings(Profile{})
+	if err != nil {
+		return AdaptiveSettings{}, err
+	}
+	probeTimeout, err := parsePositiveDuration(configuration.QoS.ProbeTimeout)
+	if err != nil {
+		return AdaptiveSettings{}, err
+	}
+	sampleInterval, err := parsePositiveDuration(configuration.QoS.SampleInterval)
+	if err != nil {
+		return AdaptiveSettings{}, err
+	}
+	var manual time.Duration
+	if configuration.QoS.ManualBaseline != "" {
+		manual, err = parsePositiveDuration(configuration.QoS.ManualBaseline)
+		if err != nil {
+			return AdaptiveSettings{}, err
+		}
+	}
+
+	return AdaptiveSettings{
+		LatencyTarget:  target,
+		MinimumRate:    rates[0],
+		MaximumRate:    rates[1],
+		ProbeTarget:    configuration.QoS.ProbeTarget,
+		ProbeTimeout:   probeTimeout,
+		SampleInterval: sampleInterval,
+		ManualBaseline: manual,
+	}, nil
+}
+
+func (configuration Config) adaptiveSettings(profile Profile) (time.Duration, [2]uint64, error) {
+	targetValue := configuration.QoS.LatencyTarget
+	if profile.LatencyTarget != "" {
+		targetValue = profile.LatencyTarget
+	}
+	target, err := parsePositiveDuration(targetValue)
+	if err != nil {
+		return 0, [2]uint64{}, ValidationError{Field: "profiles latency_target", Reason: err.Error()}
+	}
+	linkRate, err := ParseRate(configuration.QoS.LinkRate)
+	if err != nil {
+		return 0, [2]uint64{}, ValidationError{Field: "qos.link_rate", Reason: err.Error()}
+	}
+	minimum := uint64(linkRate) / 10
+	maximum := uint64(linkRate) / 10 * 8
+	minimumValue := configuration.QoS.MinimumRate
+	maximumValue := configuration.QoS.MaximumRate
+	if profile.MinimumRate != "" {
+		minimumValue = profile.MinimumRate
+	}
+	if profile.MaximumRate != "" {
+		maximumValue = profile.MaximumRate
+	}
+	if minimumValue != "" {
+		value, parseErr := ParseRate(minimumValue)
+		if parseErr != nil {
+			return 0, [2]uint64{}, ValidationError{Field: "adaptive min_rate", Reason: parseErr.Error()}
+		}
+		minimum = uint64(value)
+	}
+	if maximumValue != "" {
+		value, parseErr := ParseRate(maximumValue)
+		if parseErr != nil {
+			return 0, [2]uint64{}, ValidationError{Field: "adaptive max_rate", Reason: parseErr.Error()}
+		}
+		maximum = uint64(value)
+	}
+	if linkRate > 0 && (minimum == 0 || maximum <= minimum || maximum >= uint64(linkRate)) {
+		return 0, [2]uint64{}, ValidationError{
+			Field:  "adaptive rates",
+			Reason: "must be positive, increasing, and below qos.link_rate",
+		}
+	}
+	if linkRate == 0 && (minimum != 0 || maximum != 0) {
+		return 0, [2]uint64{}, ValidationError{Field: "adaptive rates", Reason: "require qos.link_rate"}
+	}
+
+	return target, [2]uint64{minimum, maximum}, nil
+}
+
+func parsePositiveDuration(value string) (time.Duration, error) {
+	duration, err := time.ParseDuration(value)
+	if err != nil || duration <= 0 {
+		return 0, fmt.Errorf("must be a positive duration")
+	}
+
+	return duration, nil
 }
 
 func ParseRate(value string) (int64, error) {

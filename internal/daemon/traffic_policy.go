@@ -23,7 +23,7 @@ func (service *Service) setTrafficPolicy(
 	if err != nil {
 		return ipc.PolicyResponse{}, err
 	}
-	if policy == qos.PolicyLatency && service.latencyPolicy == nil {
+	if policy == qos.PolicyLatency && service.currentLatencyPolicy() == nil {
 		return ipc.PolicyResponse{}, fmt.Errorf("latency policy is not configured")
 	}
 	service.profileMutex.Lock()
@@ -48,6 +48,7 @@ func (service *Service) setTrafficPolicy(
 func (service *Service) reconcileTrafficPolicy(ctx context.Context) error {
 	service.profileMutex.RLock()
 	policy := service.trafficPolicy
+	latencyPolicy := service.latencyPolicy
 	service.profileMutex.RUnlock()
 	downloads, err := service.store.Downloads(ctx)
 	if err != nil {
@@ -73,10 +74,10 @@ func (service *Service) reconcileTrafficPolicy(ctx context.Context) error {
 			CgroupID:              service.trafficCgroupID,
 			ActiveDownloads:       active,
 		}
-		if policy == qos.PolicyLatency && service.latencyPolicy != nil {
+		if policy == qos.PolicyLatency && latencyPolicy != nil {
 			desired, err = qos.MapAdaptivePolicy(
 				environment,
-				service.latencyPolicy.Current().RateBitsPerSecond,
+				latencyPolicy.Current().RateBitsPerSecond,
 			)
 		} else {
 			desired, err = qos.MapPolicy(policy, environment)
@@ -98,10 +99,11 @@ func (service *Service) reconcileTrafficPolicy(ctx context.Context) error {
 func (service *Service) runTelemetryObserver() {
 	defer service.waitGroup.Done()
 	_ = service.telemetryObserver.Observe(service.ctx, func(snapshot telemetry.Snapshot) error {
-		if service.latencyPolicy == nil {
+		latencyPolicy := service.currentLatencyPolicy()
+		if latencyPolicy == nil {
 			return nil
 		}
-		service.latencyPolicy.Observe(snapshot)
+		latencyPolicy.Observe(snapshot)
 		service.profileMutex.RLock()
 		active := service.trafficPolicy == qos.PolicyLatency
 		service.profileMutex.RUnlock()
@@ -111,4 +113,11 @@ func (service *Service) runTelemetryObserver() {
 
 		return nil
 	})
+}
+
+func (service *Service) currentLatencyPolicy() *qos.LatencyPolicy {
+	service.profileMutex.RLock()
+	defer service.profileMutex.RUnlock()
+
+	return service.latencyPolicy
 }
