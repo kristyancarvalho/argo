@@ -8,6 +8,7 @@ import (
 	"github.com/kristyancarvalho/argo/internal/ipc"
 	"github.com/kristyancarvalho/argo/internal/model"
 	"github.com/kristyancarvalho/argo/internal/qos"
+	"github.com/kristyancarvalho/argo/internal/telemetry"
 )
 
 func (service *Service) setTrafficPolicy(
@@ -22,8 +23,8 @@ func (service *Service) setTrafficPolicy(
 	if err != nil {
 		return ipc.PolicyResponse{}, err
 	}
-	if policy == qos.PolicyLatency {
-		return ipc.PolicyResponse{}, fmt.Errorf("latency policy is not available in this release")
+	if policy == qos.PolicyLatency && service.latencyPolicy == nil {
+		return ipc.PolicyResponse{}, fmt.Errorf("latency policy is not configured")
 	}
 	service.profileMutex.Lock()
 	previous := service.trafficPolicy
@@ -66,12 +67,20 @@ func (service *Service) reconcileTrafficPolicy(ctx context.Context) error {
 	service.networkMutex.RUnlock()
 	desired := qos.DesiredState{Policy: qos.PolicyOff}
 	if available && snapshot.Connected && snapshot.Interface != "" {
-		desired, err = qos.MapPolicy(policy, qos.PolicyEnvironment{
+		environment := qos.PolicyEnvironment{
 			Interface:             snapshot.Interface,
 			LinkRateBitsPerSecond: service.trafficLinkRate,
 			CgroupID:              service.trafficCgroupID,
 			ActiveDownloads:       active,
-		})
+		}
+		if policy == qos.PolicyLatency && service.latencyPolicy != nil {
+			desired, err = qos.MapAdaptivePolicy(
+				environment,
+				service.latencyPolicy.Current().RateBitsPerSecond,
+			)
+		} else {
+			desired, err = qos.MapPolicy(policy, environment)
+		}
 		if err != nil {
 			return err
 		}
@@ -84,4 +93,22 @@ func (service *Service) reconcileTrafficPolicy(ctx context.Context) error {
 	}
 
 	return service.trafficController.Reconcile(ctx, desired)
+}
+
+func (service *Service) runTelemetryObserver() {
+	defer service.waitGroup.Done()
+	_ = service.telemetryObserver.Observe(service.ctx, func(snapshot telemetry.Snapshot) error {
+		if service.latencyPolicy == nil {
+			return nil
+		}
+		service.latencyPolicy.Observe(snapshot)
+		service.profileMutex.RLock()
+		active := service.trafficPolicy == qos.PolicyLatency
+		service.profileMutex.RUnlock()
+		if active {
+			_ = service.reconcileTrafficPolicy(service.ctx)
+		}
+
+		return nil
+	})
 }
