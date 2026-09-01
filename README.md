@@ -60,6 +60,7 @@ QoS is applied only while downloads are active and requires a nonzero `qos.link_
 To verify a live setup, check `systemctl --user status argod.service`, `systemctl status argo-qosd@$(id -un).service`, and `argo status`. Kernel state is visible with `sudo tc -s class show dev <interface>` and `sudo nft list table inet argo` while an Argo download is active.
 
 Run `argo tui` for the optional terminal interface. It connects to the existing user daemon, and exiting the interface does not stop active downloads.
+The TUI keeps daemon and network state separate from the scrollable download list, adapts to narrow terminals, shows full selected details, and provides confirmed cancel, remove, and clear actions. Press `?` for its keyboard reference.
 
 Run `argo --help` to list commands and explain the difference between download priority and system traffic policies. Argo uses colors when writing to a terminal; set `NO_COLOR=1` to disable them.
 

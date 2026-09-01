@@ -58,6 +58,21 @@ func (client *tuiStatusClient) Cancel(_ context.Context, id string) (ipc.Downloa
 	return ipc.DownloadActionResponse{ID: id}, client.actionErr
 }
 
+func (client *tuiStatusClient) Remove(_ context.Context, id string) (ipc.DownloadActionResponse, error) {
+	client.actions = append(client.actions, "remove:"+id)
+	return ipc.DownloadActionResponse{ID: id, Status: "removed"}, client.actionErr
+}
+
+func (client *tuiStatusClient) Clear(context.Context) (ipc.ClearResponse, error) {
+	client.actions = append(client.actions, "clear")
+	return ipc.ClearResponse{Removed: 2}, client.actionErr
+}
+
+func (client *tuiStatusClient) Retry(_ context.Context, id string) (ipc.AddResponse, error) {
+	client.actions = append(client.actions, "retry:"+id)
+	return ipc.AddResponse{ID: "retried"}, client.actionErr
+}
+
 func (client *tuiStatusClient) Priority(_ context.Context, id, priority string) (ipc.PriorityResponse, error) {
 	client.actions = append(client.actions, "priority:"+id+":"+priority)
 	return ipc.PriorityResponse{ID: id, Priority: priority}, client.actionErr
@@ -183,7 +198,7 @@ func TestTUIDownloadListHandlesUnknownSizeAndLongFilename(t *testing.T) {
 		}}},
 	})
 	view := model.View()
-	if !strings.Contains(view, "1.5KB/?") || !strings.Contains(view, "…") || strings.Contains(view, longName) {
+	if !strings.Contains(view, "1.5KB/?") || !strings.Contains(view, "…") {
 		t.Fatalf("unexpected unknown-size long-name view %q", view)
 	}
 }
@@ -282,6 +297,105 @@ func TestTUIActionsDispatch(t *testing.T) {
 	want := []string{"pause:one", "resume:one", "priority:one:low", "priority:one:normal", "priority:one:high", "add:https://example.com/file", "cancel:one"}
 	if strings.Join(client.actions, ",") != strings.Join(want, ",") {
 		t.Fatalf("actions = %v, want %v", client.actions, want)
+	}
+}
+
+func TestTUILifecycleActionsRequireConfirmation(t *testing.T) {
+	client := &tuiStatusClient{status: ipc.Status{State: "running"}, downloads: [][]ipc.Download{{{ID: "one", Status: "completed"}}}}
+	model := loadTUIModel(t, client)
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	model = updated.(tui.Model)
+	if !strings.Contains(model.View(), "Remove one from history? y/N") {
+		t.Fatalf("remove confirmation is missing: %q", model.View())
+	}
+	updated, command := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	if command == nil {
+		t.Fatal("confirmed remove did not dispatch")
+	}
+	_ = command()
+	model = updated.(tui.Model)
+	updated, command = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}})
+	if command == nil {
+		t.Fatal("retry did not dispatch")
+	}
+	_ = command()
+	model = updated.(tui.Model)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'C'}})
+	model = updated.(tui.Model)
+	if !strings.Contains(model.View(), "Clear completed, failed, and canceled history? y/N") {
+		t.Fatalf("clear confirmation is missing: %q", model.View())
+	}
+	_, command = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	if command == nil {
+		t.Fatal("confirmed clear did not dispatch")
+	}
+	_ = command()
+	if strings.Join(client.actions, ",") != "remove:one,retry:one,clear" {
+		t.Fatalf("lifecycle actions = %v", client.actions)
+	}
+}
+
+func TestTUIHelpViewAndResponsiveViewport(t *testing.T) {
+	downloads := make([]ipc.Download, 12)
+	for index := range downloads {
+		downloads[index] = ipc.Download{
+			ID: strings.Repeat(string(rune('a'+index)), 32), Filename: strings.Repeat("long-name-", 6) + string(rune('a'+index)) + ".bin",
+			URL: "https://example.test/" + strings.Repeat("path/", 12), Status: "downloading", Priority: "normal",
+			DownloadedBytes: int64(index), TotalSize: 100,
+		}
+	}
+	model := loadTUIModel(t, &tuiStatusClient{status: ipc.Status{State: "running"}, downloads: [][]ipc.Download{downloads}})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 48, Height: 18})
+	model = updated.(tui.Model)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	help := updated.(tui.Model).View()
+	if !strings.Contains(help, "Help") || !strings.Contains(help, "retry as a new transfer") {
+		t.Fatalf("help view is incomplete: %q", help)
+	}
+	updated, _ = updated.(tui.Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	model = updated.(tui.Model)
+	for index := 0; index < 10; index++ {
+		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+		model = updated.(tui.Model)
+	}
+	view := model.View()
+	if !strings.Contains(view, "> long-name-") || !strings.Contains(view, "  kkkkkkk") || !strings.Contains(view, "above") {
+		t.Fatalf("selection was not kept in the viewport: %q", view)
+	}
+	for _, line := range strings.Split(view, "\n") {
+		if len([]rune(line)) > 48 {
+			t.Fatalf("narrow view line exceeds width: %d %q", len([]rune(line)), line)
+		}
+	}
+}
+
+func TestTUIStatesRemainDistinctWithoutColor(t *testing.T) {
+	states := []string{"downloading", "paused", "completed", "failed", "canceled"}
+	downloads := make([]ipc.Download, len(states))
+	for index, state := range states {
+		downloads[index] = ipc.Download{ID: state, Filename: state + ".bin", Status: state, Priority: "normal"}
+	}
+	model := loadTUIModel(t, &tuiStatusClient{status: ipc.Status{State: "running"}, downloads: [][]ipc.Download{downloads}})
+	view := model.View()
+	for _, state := range states {
+		if !strings.Contains(view, state) {
+			t.Fatalf("state %q is not visible without color: %q", state, view)
+		}
+	}
+	if !strings.Contains(view, "0s") {
+		t.Fatalf("completed ETA is not zero: %q", view)
+	}
+}
+
+func TestTUIShortensListIDAndKeepsFullSelectedID(t *testing.T) {
+	identifier := strings.Repeat("a", 32)
+	model := loadTUIModel(t, &tuiStatusClient{
+		status:    ipc.Status{State: "running"},
+		downloads: [][]ipc.Download{{{ID: identifier, Filename: "file.bin", Status: "paused", Priority: "normal"}}},
+	})
+	view := model.View()
+	if strings.Count(view, identifier) != 1 || !strings.Contains(view, "aaaaaaa…") {
+		t.Fatalf("list/detail ID hierarchy is incorrect: %q", view)
 	}
 }
 
