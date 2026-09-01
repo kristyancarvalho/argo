@@ -196,6 +196,29 @@ func TestConcurrentSchedulerUsesConfiguredDefaultPriority(t *testing.T) {
 	engine.release("configured")
 }
 
+func TestServiceCloseStopsActiveWorkers(t *testing.T) {
+	store := openTestStore(t)
+	engine := newControlledDownloadEngine(store, "active")
+	service := newSchedulerService(t, store, engine, 1)
+	identifier := addScheduledDownload(t, service, "active")
+	assertStartedDownload(t, engine, identifier)
+	closed := make(chan error, 1)
+	go func() {
+		closed <- service.Close()
+	}()
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("service close did not stop active workers")
+	}
+	if engine.activeCount() != 0 {
+		t.Fatalf("active worker count is %d after service close", engine.activeCount())
+	}
+}
+
 func (engine *controlledDownloadEngine) Download(ctx context.Context, download model.Download) error {
 	if download.Status == model.StatusQueued {
 		if err := engine.store.UpdateDownloadStatus(
@@ -389,6 +412,13 @@ func (engine *controlledDownloadEngine) maximum() int {
 	defer engine.mutex.Unlock()
 
 	return engine.maximumActive
+}
+
+func (engine *controlledDownloadEngine) activeCount() int {
+	engine.mutex.Lock()
+	defer engine.mutex.Unlock()
+
+	return engine.active
 }
 
 func filenameForID(t *testing.T, store *storage.Store, identifier model.DownloadID) string {
