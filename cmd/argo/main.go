@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/kristyancarvalho/argo/internal/cli"
+	"github.com/kristyancarvalho/argo/internal/console"
 	"github.com/kristyancarvalho/argo/internal/ipc"
 	"github.com/kristyancarvalho/argo/internal/tui"
 )
@@ -18,6 +19,14 @@ func main() {
 }
 
 func run(arguments []string) error {
+	if len(arguments) > 0 {
+		switch arguments[0] {
+		case "help", "-h", "--help":
+			return cli.RunWithOptions(
+				context.Background(), nil, os.Stdout, arguments, cli.Options{Color: console.Enabled(os.Stdout)},
+			)
+		}
+	}
 	socketPath, err := ipc.DefaultSocketPath()
 	if err != nil {
 		return err
@@ -33,5 +42,5 @@ func run(arguments []string) error {
 		return tui.Run(ctx, client, os.Stdin, os.Stdout)
 	}
 
-	return cli.Run(ctx, client, os.Stdout, arguments)
+	return cli.RunWithOptions(ctx, client, os.Stdout, arguments, cli.Options{Color: console.Enabled(os.Stdout)})
 }

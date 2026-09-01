@@ -6,10 +6,11 @@ import (
 	"io"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/kristyancarvalho/argo/internal/console"
 )
 
 func Run(ctx context.Context, client Client, input io.Reader, output io.Writer) error {
-	model, err := NewModel(ctx, client)
+	model, err := NewModelWithOptions(ctx, client, Options{Color: console.Enabled(output)})
 	if err != nil {
 		return err
 	}
