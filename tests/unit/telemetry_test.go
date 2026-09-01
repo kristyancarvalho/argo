@@ -25,7 +25,7 @@ func TestTelemetryAggregatesTransferSamples(t *testing.T) {
 	})
 	if snapshot.Transfers[first].BytesPerSecond != 100 ||
 		snapshot.Transfers[second].BytesPerSecond != 200 ||
-		snapshot.AggregateBytesPerSecond != 300 {
+		snapshot.ActiveTransfers != 2 || snapshot.AggregateBytesPerSecond != 300 {
 		t.Fatalf("unexpected telemetry snapshot: %+v", snapshot)
 	}
 }

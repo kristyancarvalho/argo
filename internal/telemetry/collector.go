@@ -36,6 +36,7 @@ func (collector *Collector) Sample(
 	}
 	snapshot.Latency = latency
 	snapshot.LatencyAvailable = true
+	snapshot.LatencySampledAt = time.Now().UTC()
 
 	return snapshot
 }

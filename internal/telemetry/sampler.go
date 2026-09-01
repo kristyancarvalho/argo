@@ -22,9 +22,11 @@ type TransferSample struct {
 
 type Snapshot struct {
 	Transfers               map[model.DownloadID]TransferSample
+	ActiveTransfers         int
 	AggregateBytesPerSecond int64
 	Latency                 time.Duration
 	LatencyAvailable        bool
+	LatencySampledAt        time.Time
 	SampledAt               time.Time
 }
 
@@ -102,6 +104,7 @@ func (sampler *Sampler) Sample(observations []TransferObservation) Snapshot {
 
 	return Snapshot{
 		Transfers:               transfers,
+		ActiveTransfers:         len(seen),
 		AggregateBytesPerSecond: aggregate,
 		SampledAt:               sampledAt,
 	}
