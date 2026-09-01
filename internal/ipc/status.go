@@ -25,6 +25,7 @@ type TrafficStatus struct {
 	BaselineLatency          time.Duration `json:"baseline_latency"`
 	BaselineAvailable        bool          `json:"baseline_available"`
 	ControllerState          string        `json:"controller_state"`
+	Error                    string        `json:"error"`
 }
 
 type NetworkStatus struct {

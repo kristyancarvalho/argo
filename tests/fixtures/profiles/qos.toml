@@ -1,0 +1,39 @@
+[download]
+default_priority = "normal"
+max_concurrent_downloads = 3
+max_chunks_per_download = 4
+rate_limit = "0"
+
+[network]
+pause_on_metered = false
+resume_after_metered = false
+
+[qos]
+policy = "off"
+link_rate = "100M"
+latency_target = "20ms"
+probe_timeout = "1s"
+sample_interval = "1s"
+
+[profiles.focused]
+download_limit = "80M"
+default_priority = "high"
+max_concurrent_downloads = 4
+policy = "throughput"
+
+[profiles.responsive]
+download_limit = "20M"
+default_priority = "low"
+max_concurrent_downloads = 1
+pause_on_metered = true
+resume_after_metered = true
+policy = "focus"
+
+[profiles.adaptive]
+download_limit = "50M"
+default_priority = "normal"
+max_concurrent_downloads = 2
+policy = "latency"
+latency_target = "12ms"
+min_rate = "10M"
+max_rate = "70M"

@@ -6,12 +6,49 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/kristyancarvalho/argo/internal/config"
 	"github.com/kristyancarvalho/argo/internal/model"
 )
+
+func TestProfileConfigurationFixture(t *testing.T) {
+	_, filename, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve test fixture path")
+	}
+	path := filepath.Join(filepath.Dir(filename), "..", "fixtures", "profiles", "qos.toml")
+	configuration, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name        string
+		rate        int64
+		priority    model.Priority
+		concurrency int
+		policy      string
+		minimum     uint64
+		maximum     uint64
+	}{
+		{"focused", 80_000_000, model.PriorityHigh, 4, "throughput", 10_000_000, 80_000_000},
+		{"responsive", 20_000_000, model.PriorityLow, 1, "focus", 10_000_000, 80_000_000},
+		{"adaptive", 50_000_000, model.PriorityNormal, 2, "latency", 10_000_000, 70_000_000},
+	}
+	for _, test := range tests {
+		profile, err := configuration.Profile(test.name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if profile.BytesPerSecond != test.rate || profile.DefaultPriority != test.priority ||
+			profile.MaxConcurrentDownloads != test.concurrency || profile.Policy != test.policy ||
+			profile.MinimumRate != test.minimum || profile.MaximumRate != test.maximum {
+			t.Fatalf("profile %s = %+v", test.name, profile)
+		}
+	}
+}
 
 func TestConfigurationDefaultsAndReloadStrategy(t *testing.T) {
 	configuration := config.Defaults()

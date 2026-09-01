@@ -35,6 +35,7 @@ func (service *Service) setTrafficPolicy(
 		service.trafficPolicy = previous
 		service.profileMutex.Unlock()
 		_ = service.reconcileTrafficPolicy(context.WithoutCancel(ctx))
+		service.setTrafficError(err)
 		return ipc.PolicyResponse{}, err
 	}
 	applied := false
@@ -45,7 +46,10 @@ func (service *Service) setTrafficPolicy(
 	return ipc.PolicyResponse{Policy: string(policy), Applied: applied}, nil
 }
 
-func (service *Service) reconcileTrafficPolicy(ctx context.Context) error {
+func (service *Service) reconcileTrafficPolicy(ctx context.Context) (resultErr error) {
+	defer func() {
+		service.setTrafficError(resultErr)
+	}()
 	service.profileMutex.RLock()
 	policy := service.trafficPolicy
 	latencyPolicy := service.latencyPolicy
@@ -94,6 +98,15 @@ func (service *Service) reconcileTrafficPolicy(ctx context.Context) error {
 	}
 
 	return service.trafficController.Reconcile(ctx, desired)
+}
+
+func (service *Service) setTrafficError(err error) {
+	service.trafficErrorMutex.Lock()
+	defer service.trafficErrorMutex.Unlock()
+	service.trafficError = ""
+	if err != nil {
+		service.trafficError = err.Error()
+	}
 }
 
 func (service *Service) runTelemetryObserver() {
