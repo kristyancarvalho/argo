@@ -205,6 +205,57 @@ func TestCLIRejectsInvalidArguments(t *testing.T) {
 	}
 }
 
+func TestCLIHelpAliases(t *testing.T) {
+	for _, command := range []string{"help", "-h", "--help"} {
+		var output bytes.Buffer
+		if err := cli.Run(context.Background(), nil, &output, []string{command}); err != nil {
+			t.Fatalf("%s: %v", command, err)
+		}
+		for _, value := range []string{
+			"Usage:", "add <url>", "Traffic policies:",
+			"Priorities only order queued downloads inside Argo", "privileged argo-qosd helper",
+		} {
+			if !strings.Contains(output.String(), value) {
+				t.Fatalf("help output %q does not contain %q", output.String(), value)
+			}
+		}
+	}
+	err := cli.Run(context.Background(), nil, &bytes.Buffer{}, []string{"help", "status"})
+	var usageError cli.UsageError
+	if !errors.As(err, &usageError) {
+		t.Fatalf("help operand returned %T, expected UsageError", err)
+	}
+}
+
+func TestCLIColorRenderingCanBeEnabled(t *testing.T) {
+	client := &cliClient{}
+	var colored bytes.Buffer
+	if err := cli.RunWithOptions(
+		context.Background(), client, &colored, []string{"status"}, cli.Options{Color: true},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(colored.String(), "\x1b[") || !strings.Contains(colored.String(), "running") {
+		t.Fatalf("colored output is missing ANSI styling: %q", colored.String())
+	}
+	var plain bytes.Buffer
+	if err := cli.Run(context.Background(), client, &plain, []string{"status"}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(plain.String(), "\x1b[") {
+		t.Fatalf("plain output contains ANSI styling: %q", plain.String())
+	}
+	colored.Reset()
+	if err := cli.RunWithOptions(
+		context.Background(), nil, &colored, []string{"--help"}, cli.Options{Color: true},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(colored.String(), "\x1b[") || !strings.Contains(colored.String(), "Traffic policies") {
+		t.Fatalf("colored help is missing styling: %q", colored.String())
+	}
+}
+
 func TestCLIWatchCompletedDownload(t *testing.T) {
 	client := &cliClient{watch: true}
 	var output bytes.Buffer

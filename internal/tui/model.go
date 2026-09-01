@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/kristyancarvalho/argo/internal/console"
 	"github.com/kristyancarvalho/argo/internal/ipc"
 )
 
@@ -71,9 +72,18 @@ type Model struct {
 	input     string
 	mode      inputMode
 	ready     bool
+	color     bool
+}
+
+type Options struct {
+	Color bool
 }
 
 func NewModel(ctx context.Context, client Client) (Model, error) {
+	return NewModelWithOptions(ctx, client, Options{})
+}
+
+func NewModelWithOptions(ctx context.Context, client Client, options Options) (Model, error) {
 	if ctx == nil || client == nil {
 		return Model{}, fmt.Errorf("TUI requires context and daemon client")
 	}
@@ -83,6 +93,7 @@ func NewModel(ctx context.Context, client Client) (Model, error) {
 		client:   client,
 		speeds:   make(map[string]int64),
 		previous: make(map[string]transferPoint),
+		color:    options.Color,
 	}, nil
 }
 
@@ -162,17 +173,18 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 
 func (model Model) View() string {
 	var view strings.Builder
-	view.WriteString("Argo\n\n")
+	view.WriteString(console.Paint(model.color, console.Bold, "Argo"))
+	view.WriteString("\n\n")
 	switch {
 	case !model.ready:
-		view.WriteString("Connecting to daemon…\n")
+		view.WriteString(console.Paint(model.color, console.Yellow, "Connecting to daemon…"))
+		view.WriteByte('\n')
 	case model.err != nil:
-		view.WriteString("Daemon unavailable: ")
-		view.WriteString(model.err.Error())
+		view.WriteString(console.Paint(model.color, console.Red, "Daemon unavailable: "+model.err.Error()))
 		view.WriteByte('\n')
 	default:
 		view.WriteString("Daemon: ")
-		view.WriteString(model.status.State)
+		view.WriteString(console.Paint(model.color, console.Green, model.status.State))
 		view.WriteString("\n\n")
 		model.renderNetworkAndQoS(&view)
 		view.WriteByte('\n')
@@ -186,8 +198,7 @@ func (model Model) View() string {
 				marker = ">"
 			}
 			speed := model.speeds[download.ID]
-			_, _ = fmt.Fprintf(
-				&view,
+			row := fmt.Sprintf(
 				"%s %-32s %-32s %-14s %-11s %-8s %-12s %s\n",
 				marker,
 				download.ID,
@@ -198,6 +209,18 @@ func (model Model) View() string {
 				download.Status,
 				download.Priority,
 			)
+			color := console.Code("")
+			switch {
+			case index == model.selected:
+				color = console.Cyan
+			case download.Status == "completed":
+				color = console.Green
+			case download.Status == "paused":
+				color = console.Yellow
+			case download.Status == "failed" || download.Status == "canceled":
+				color = console.Red
+			}
+			view.WriteString(console.Paint(model.color, color, row))
 		}
 	}
 	if model.mode == inputModeAdd || model.mode == inputModeProfile {
@@ -206,29 +229,28 @@ func (model Model) View() string {
 			label = "Profile name: "
 		}
 		view.WriteString("\n")
-		view.WriteString(label)
+		view.WriteString(console.Paint(model.color, console.Cyan, label))
 		view.WriteString(model.input)
 		view.WriteString("\nEnter submit  Esc cancel\n")
 		return view.String()
 	}
 	if model.mode == inputModeCancel {
-		_, _ = fmt.Fprintf(&view, "\nCancel %s? y/N\n", model.downloads[model.selected].ID)
+		view.WriteString(console.Paint(model.color, console.Yellow, fmt.Sprintf("\nCancel %s? y/N\n", model.downloads[model.selected].ID)))
 		return view.String()
 	}
 	if model.mode == inputModePolicy {
-		view.WriteString("\nSelect traffic policy: 1 off  2 balanced  3 throughput  4 latency  5 focus  Esc cancel\n")
+		view.WriteString(console.Paint(model.color, console.Cyan, "\nSelect traffic policy: 1 off  2 balanced  3 throughput  4 latency  5 focus  Esc cancel\n"))
 		return view.String()
 	}
 	if model.actionErr != nil {
-		view.WriteString("\nAction failed: ")
-		view.WriteString(model.actionErr.Error())
+		view.WriteString(console.Paint(model.color, console.Red, "\nAction failed: "+model.actionErr.Error()))
 		view.WriteByte('\n')
 	} else if model.notice != "" {
 		view.WriteString("\n")
-		view.WriteString(model.notice)
+		view.WriteString(console.Paint(model.color, console.Green, model.notice))
 		view.WriteByte('\n')
 	}
-	view.WriteString("\n↑/k ↓/j select  a add  p pause  r resume  c cancel  1/2/3 priority  t policy  f profile  q quit\n")
+	view.WriteString(console.Paint(model.color, console.Dim, "\n↑/k ↓/j select  a add  p pause  r resume  c cancel  1/2/3 priority  t policy  f profile  q quit\n"))
 
 	return view.String()
 }
