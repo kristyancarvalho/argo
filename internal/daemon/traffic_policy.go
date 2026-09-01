@@ -60,23 +60,27 @@ func (service *Service) reconcileTrafficPolicy(ctx context.Context) error {
 		case model.StatusPaused, model.StatusCompleted, model.StatusFailed, model.StatusCanceled:
 		}
 	}
+	service.networkMutex.RLock()
+	snapshot := service.networkSnapshot
+	available := service.networkAvailable
+	service.networkMutex.RUnlock()
+	desired := qos.DesiredState{Policy: qos.PolicyOff}
+	if available && snapshot.Connected && snapshot.Interface != "" {
+		desired, err = qos.MapPolicy(policy, qos.PolicyEnvironment{
+			Interface:             snapshot.Interface,
+			LinkRateBitsPerSecond: service.trafficLinkRate,
+			CgroupID:              service.trafficCgroupID,
+			ActiveDownloads:       active,
+		})
+		if err != nil {
+			return err
+		}
+	}
 	if service.trafficController == nil {
-		if policy == qos.PolicyOff || active == 0 {
+		if !desired.Enabled {
 			return nil
 		}
 		return fmt.Errorf("QoS helper is unavailable")
-	}
-	service.networkMutex.RLock()
-	interfaceName := service.networkSnapshot.Interface
-	service.networkMutex.RUnlock()
-	desired, err := qos.MapPolicy(policy, qos.PolicyEnvironment{
-		Interface:             interfaceName,
-		LinkRateBitsPerSecond: service.trafficLinkRate,
-		CgroupID:              service.trafficCgroupID,
-		ActiveDownloads:       active,
-	})
-	if err != nil {
-		return err
 	}
 
 	return service.trafficController.Reconcile(ctx, desired)
