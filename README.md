@@ -30,6 +30,7 @@ resume_after_metered = false
 
 [qos]
 policy = "off"
+link_rate = "0"
 
 [profiles.gaming]
 download_limit = "30M"
@@ -41,7 +42,13 @@ policy = "latency"
 ```
 
 Configuration is loaded at daemon startup. Restart `argod` after editing the file.
-Select a configured profile at runtime with `argo profile <name>`. `0` means unlimited bandwidth, while `K`, `M`, and `G` are decimal byte-rate suffixes. The active profile is persisted across daemon restarts.
+Select a configured profile at runtime with `argo profile <name>`. Select system traffic shaping with `argo policy <off|balanced|throughput|focus>`. Download rates use bytes per second, while `qos.link_rate` is the connection capacity in bits per second. `K`, `M`, and `G` are decimal suffixes; a positive link rate is required while shaping active downloads. The active profile is persisted across daemon restarts.
+
+## systemd
+
+Install `packaging/systemd/argod.service` under the user unit directory and `packaging/systemd/argo-qosd@.service` under the system unit directory. Start the downloader for the current user with `systemctl --user enable --now argod.service`.
+
+The QoS helper is a system service template. Start exactly one instance for the account running `argod`, for example `systemctl enable --now argo-qosd@alice.service`. The helper runs as that account with only `CAP_NET_ADMIN`; `argod` remains unprivileged. It owns the Argo nftables table and traffic-control tree used by active traffic policies.
 
 ## License
 

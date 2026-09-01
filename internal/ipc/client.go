@@ -104,6 +104,15 @@ func (client *Client) Profile(ctx context.Context, name string) (ProfileResponse
 	return response, nil
 }
 
+func (client *Client) Policy(ctx context.Context, policy string) (PolicyResponse, error) {
+	var response PolicyResponse
+	if err := client.Call(ctx, OperationPolicy, PolicyRequest{Policy: policy}, &response); err != nil {
+		return PolicyResponse{}, err
+	}
+
+	return response, nil
+}
+
 func (client *Client) downloadAction(
 	ctx context.Context,
 	operation Operation,

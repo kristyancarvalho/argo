@@ -1,0 +1,19 @@
+[Unit]
+Description=Argo download manager daemon
+Documentation=https://github.com/kristyancarvalho/argo
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=exec
+ExecStart=/usr/bin/argod
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=15s
+KillSignal=SIGTERM
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+UMask=0077
+
+[Install]
+WantedBy=default.target

@@ -13,7 +13,7 @@ func TestExecutablesBuild(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	command := exec.Command("go", "build", "./cmd/argo", "./cmd/argod")
+	command := exec.Command("go", "build", "./cmd/argo", "./cmd/argod", "./cmd/argo-qosd")
 	command.Dir = filepath.Clean(filepath.Join(workingDirectory, "..", ".."))
 	output, err := command.CombinedOutput()
 	if err != nil {
