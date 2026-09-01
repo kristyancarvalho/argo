@@ -56,6 +56,19 @@ func (client *Client) Cancel(ctx context.Context, id string) (DownloadActionResp
 	return client.downloadAction(ctx, OperationCancel, id)
 }
 
+func (client *Client) Remove(ctx context.Context, id string) (DownloadActionResponse, error) {
+	return client.downloadAction(ctx, OperationRemove, id)
+}
+
+func (client *Client) Clear(ctx context.Context) (ClearResponse, error) {
+	var response ClearResponse
+	if err := client.Call(ctx, OperationClear, nil, &response); err != nil {
+		return ClearResponse{}, err
+	}
+
+	return response, nil
+}
+
 func (client *Client) Priority(ctx context.Context, id, priority string) (PriorityResponse, error) {
 	var response PriorityResponse
 	if err := client.Call(ctx, OperationPriority, PriorityRequest{

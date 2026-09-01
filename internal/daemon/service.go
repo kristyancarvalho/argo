@@ -26,6 +26,8 @@ const DefaultMaximumConcurrentDownloads = 3
 
 type Store interface {
 	CreateDownload(context.Context, model.Download) error
+	DeleteDownload(context.Context, model.DownloadID) error
+	ClearDownloadHistory(context.Context) ([]model.Download, error)
 	Download(context.Context, model.DownloadID) (model.Download, error)
 	Downloads(context.Context) ([]model.Download, error)
 	RecoverActiveDownloads(context.Context, time.Time) error
@@ -35,6 +37,10 @@ type Store interface {
 
 type DownloadEngine interface {
 	Download(context.Context, model.Download) error
+}
+
+type PartialCleaner interface {
+	RemovePartial(model.DownloadID) error
 }
 
 type DownloadRateController interface {
@@ -131,6 +137,7 @@ type Service struct {
 	trafficError       string
 	telemetryObserver  TelemetryObserver
 	latencyPolicy      *qos.LatencyPolicy
+	partialCleaner     PartialCleaner
 }
 
 func NewService(parent context.Context, store Store, engine DownloadEngine) (*Service, error) {
@@ -270,6 +277,7 @@ func NewServiceWithOptions(
 		telemetryObserver:  options.TelemetryObserver,
 		latencyPolicy:      options.LatencyPolicy,
 	}
+	service.partialCleaner, _ = engine.(PartialCleaner)
 	service.waitGroup.Add(1)
 	go service.runScheduler()
 	if service.networkObserver != nil {
@@ -306,6 +314,10 @@ func (service *Service) Handle(ctx context.Context, request ipc.Request) (any, e
 		return service.setProfile(ctx, request.Payload)
 	case ipc.OperationPolicy:
 		return service.setTrafficPolicy(ctx, request.Payload)
+	case ipc.OperationRemove:
+		return service.remove(ctx, request.Payload)
+	case ipc.OperationClear:
+		return service.clearHistory(ctx)
 	default:
 		return nil, ipc.UnsupportedOperationError{Operation: request.Operation}
 	}
@@ -560,6 +572,59 @@ func (service *Service) cancelDownload(
 	_ = service.reconcileTrafficPolicy(context.WithoutCancel(ctx))
 
 	return actionResponse(identifier, model.StatusCanceled), nil
+}
+
+func (service *Service) remove(
+	ctx context.Context,
+	payload json.RawMessage,
+) (ipc.DownloadActionResponse, error) {
+	identifier, download, err := service.actionDownload(ctx, payload)
+	if err != nil {
+		return ipc.DownloadActionResponse{}, err
+	}
+	switch download.Status {
+	case model.StatusCompleted:
+	case model.StatusFailed, model.StatusCanceled:
+		if service.partialCleaner == nil {
+			return ipc.DownloadActionResponse{}, fmt.Errorf("download engine cannot clean partial state")
+		}
+		if err := service.partialCleaner.RemovePartial(identifier); err != nil {
+			return ipc.DownloadActionResponse{}, err
+		}
+	case model.StatusQueued, model.StatusResolving, model.StatusDownloading, model.StatusPaused:
+		return ipc.DownloadActionResponse{}, InvalidDownloadActionError{
+			ID: identifier.String(), Action: "remove", Status: download.Status,
+		}
+	}
+	if err := service.store.DeleteDownload(ctx, identifier); err != nil {
+		return ipc.DownloadActionResponse{}, err
+	}
+
+	return ipc.DownloadActionResponse{ID: identifier.String(), Status: "removed"}, nil
+}
+
+func (service *Service) clearHistory(ctx context.Context) (ipc.ClearResponse, error) {
+	downloads, err := service.store.Downloads(ctx)
+	if err != nil {
+		return ipc.ClearResponse{}, err
+	}
+	for _, download := range downloads {
+		if download.Status != model.StatusFailed && download.Status != model.StatusCanceled {
+			continue
+		}
+		if service.partialCleaner == nil {
+			return ipc.ClearResponse{}, fmt.Errorf("download engine cannot clean partial state")
+		}
+		if err := service.partialCleaner.RemovePartial(download.ID); err != nil {
+			return ipc.ClearResponse{}, err
+		}
+	}
+	removed, err := service.store.ClearDownloadHistory(ctx)
+	if err != nil {
+		return ipc.ClearResponse{}, err
+	}
+
+	return ipc.ClearResponse{Removed: len(removed)}, nil
 }
 
 func (service *Service) list(ctx context.Context) (ipc.ListResponse, error) {
