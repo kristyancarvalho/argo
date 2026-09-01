@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/kristyancarvalho/argo/internal/model"
@@ -179,6 +180,31 @@ func (store *Store) UpdateDownloadPriority(
 	updated, err := result.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("read priority update result for download %s: %w", id, err)
+	}
+	if updated != 1 {
+		return fmt.Errorf("%w: %s", ErrDownloadNotFound, id)
+	}
+
+	return nil
+}
+
+func (store *Store) UpdateDownloadFilename(
+	ctx context.Context,
+	id model.DownloadID,
+	filename string,
+	updatedAt time.Time,
+) error {
+	if filename == "" || filename != filepath.Base(filename) || filename == "." || filename == ".." {
+		return fmt.Errorf("invalid download filename %q", filename)
+	}
+	result, err := store.database.ExecContext(ctx, `UPDATE downloads
+        SET filename = ?, updated_at = ? WHERE id = ?`, filename, formatTime(updatedAt), id.String())
+	if err != nil {
+		return fmt.Errorf("update filename for download %s: %w", id, err)
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read filename update result for download %s: %w", id, err)
 	}
 	if updated != 1 {
 		return fmt.Errorf("%w: %s", ErrDownloadNotFound, id)

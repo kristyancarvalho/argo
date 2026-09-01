@@ -242,6 +242,7 @@ func parallelEngine(
 		MaximumChunks:    4,
 		MinimumChunkSize: 1024,
 		ChunkProgress:    observer,
+		PartsDirectory:   t.TempDir(),
 	})
 	if err != nil {
 		t.Fatal(err)

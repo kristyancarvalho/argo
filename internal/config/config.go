@@ -29,6 +29,7 @@ type Config struct {
 }
 
 type Download struct {
+	Directory              string         `toml:"directory"`
 	DefaultPriority        model.Priority `toml:"default_priority"`
 	MaxConcurrentDownloads int            `toml:"max_concurrent_downloads"`
 	MaxChunksPerDownload   int            `toml:"max_chunks_per_download"`
@@ -99,6 +100,7 @@ func (err ValidationError) Error() string {
 func Defaults() Config {
 	return Config{
 		Download: Download{
+			Directory:              "~/Downloads",
 			DefaultPriority:        model.PriorityNormal,
 			MaxConcurrentDownloads: defaultConcurrent,
 			MaxChunksPerDownload:   defaultChunks,
@@ -162,6 +164,9 @@ func Load(path string) (Config, error) {
 }
 
 func (configuration Config) Validate() error {
+	if _, err := configuration.DownloadDirectory(); err != nil {
+		return ValidationError{Field: "download.directory", Reason: err.Error()}
+	}
 	if _, err := model.ParsePriority(string(configuration.Download.DefaultPriority)); err != nil {
 		return ValidationError{Field: "download.default_priority", Reason: err.Error()}
 	}
@@ -224,6 +229,39 @@ func (configuration Config) Validate() error {
 	}
 
 	return nil
+}
+
+func (configuration Config) DownloadDirectory() (string, error) {
+	value := strings.TrimSpace(configuration.Download.Directory)
+	if value == "" {
+		value = "~/Downloads"
+	}
+	if value == "~" || strings.HasPrefix(value, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("determine home directory: %w", err)
+		}
+		if value == "~" {
+			value = home
+		} else {
+			value = filepath.Join(home, strings.TrimPrefix(value, "~/"))
+		}
+	} else if strings.HasPrefix(value, "~") {
+		return "", fmt.Errorf("home shorthand must be ~ or start with ~/")
+	}
+	if !filepath.IsAbs(value) {
+		return "", fmt.Errorf("must be an absolute path or start with ~/")
+	}
+	value = filepath.Clean(value)
+	info, err := os.Stat(value)
+	if err == nil && !info.IsDir() {
+		return "", fmt.Errorf("path is not a directory: %s", value)
+	}
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("inspect directory %s: %w", value, err)
+	}
+
+	return value, nil
 }
 
 func (configuration Config) Profile(name string) (EffectiveProfile, error) {

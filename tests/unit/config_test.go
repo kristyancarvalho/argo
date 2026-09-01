@@ -51,6 +51,8 @@ func TestProfileConfigurationFixture(t *testing.T) {
 }
 
 func TestConfigurationDefaultsAndReloadStrategy(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
 	configuration := config.Defaults()
 	if configuration.Download.DefaultPriority != model.PriorityNormal ||
 		configuration.Download.MaxConcurrentDownloads != 3 ||
@@ -64,6 +66,47 @@ func TestConfigurationDefaultsAndReloadStrategy(t *testing.T) {
 	}
 	if configuration.ReloadStrategy() != config.ReloadOnRestart {
 		t.Fatalf("reload strategy is %q, expected restart", configuration.ReloadStrategy())
+	}
+	directory, err := configuration.DownloadDirectory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if directory != filepath.Join(home, "Downloads") {
+		t.Fatalf("default download directory is %q", directory)
+	}
+}
+
+func TestDownloadDirectoryConfiguration(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	custom := filepath.Join(home, "Downloads with spaces")
+	configuration := config.Defaults()
+	configuration.Download.Directory = "~/Downloads with spaces"
+	directory, err := configuration.DownloadDirectory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if directory != custom {
+		t.Fatalf("expanded directory is %q, expected %q", directory, custom)
+	}
+	configuration.Download.Directory = filepath.Join(home, "absolute")
+	directory, err = configuration.DownloadDirectory()
+	if err != nil || directory != configuration.Download.Directory {
+		t.Fatalf("absolute directory resolved to %q with %v", directory, err)
+	}
+}
+
+func TestInvalidDownloadDirectoryConfiguration(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(file, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []string{"relative/path", "~someone/Downloads", file} {
+		configuration := config.Defaults()
+		configuration.Download.Directory = value
+		if _, err := configuration.DownloadDirectory(); err == nil {
+			t.Fatalf("invalid directory %q was accepted", value)
+		}
 	}
 }
 

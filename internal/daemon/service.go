@@ -60,6 +60,7 @@ type ServiceOptions struct {
 	PauseOnMetered             bool
 	ResumeAfterMetered         bool
 	DefaultPriority            model.Priority
+	DefaultDestination         string
 	Profiles                   map[string]Profile
 	TrafficPolicy              qos.Policy
 	TrafficLinkRate            uint64
@@ -116,6 +117,7 @@ type Service struct {
 	meteredMutex       sync.Mutex
 	meteredPaused      map[model.DownloadID]struct{}
 	defaultPriority    model.Priority
+	defaultDestination string
 	profileMutex       sync.RWMutex
 	profiles           map[string]Profile
 	activeProfile      string
@@ -149,6 +151,9 @@ func NewServiceWithOptions(
 	}
 	if options.DefaultPriority == "" {
 		options.DefaultPriority = model.PriorityNormal
+	}
+	if options.DefaultDestination != "" && !filepath.IsAbs(options.DefaultDestination) {
+		return nil, fmt.Errorf("default download destination must be absolute")
 	}
 	if options.TrafficPolicy == "" {
 		options.TrafficPolicy = qos.PolicyOff
@@ -253,6 +258,7 @@ func NewServiceWithOptions(
 		resumeAfterMetered: options.ResumeAfterMetered,
 		meteredPaused:      make(map[model.DownloadID]struct{}),
 		defaultPriority:    options.DefaultPriority,
+		defaultDestination: options.DefaultDestination,
 		profiles:           profiles,
 		activeProfile:      activeProfile,
 		profileStore:       profileStore,
@@ -365,7 +371,7 @@ func (service *Service) add(ctx context.Context, payload json.RawMessage) (ipc.A
 		return ipc.AddResponse{}, InvalidAddRequestError{Reason: err.Error()}
 	}
 
-	download, err := newDownload(request, service.currentDefaultPriority())
+	download, err := newDownload(request, service.currentDefaultPriority(), service.defaultDestination)
 	if err != nil {
 		return ipc.AddResponse{}, err
 	}
@@ -812,7 +818,7 @@ func downloadResponse(download model.Download) ipc.Download {
 	}
 }
 
-func newDownload(request ipc.AddRequest, priority model.Priority) (model.Download, error) {
+func newDownload(request ipc.AddRequest, priority model.Priority, defaultDestination string) (model.Download, error) {
 	parsedURL, err := url.Parse(request.URL)
 	if err != nil {
 		return model.Download{}, InvalidAddRequestError{Reason: "URL cannot be parsed"}
@@ -821,7 +827,10 @@ func newDownload(request ipc.AddRequest, priority model.Priority) (model.Downloa
 		return model.Download{}, InvalidAddRequestError{Reason: "URL must use HTTP or HTTPS and include a host"}
 	}
 	if request.Destination == "" {
-		return model.Download{}, InvalidAddRequestError{Reason: "destination is required"}
+		request.Destination = defaultDestination
+	}
+	if request.Destination == "" {
+		return model.Download{}, InvalidAddRequestError{Reason: "destination is required and no default is configured"}
 	}
 	destination, err := filepath.Abs(request.Destination)
 	if err != nil {

@@ -31,6 +31,7 @@ type mutableRangeFixture struct {
 }
 
 func TestParallelChunksResumeAfterRestartWithIntegrity(t *testing.T) {
+	isolateDownloadState(t)
 	payload := makePayload(4 * recoveryChunkSize)
 	fixture := newMutableRangeFixture(t, payload)
 	databasePath := filepath.Join(t.TempDir(), "argo.db")
@@ -68,12 +69,13 @@ func TestParallelChunksInvalidateChangedLastModified(t *testing.T) {
 }
 
 func TestParallelChunksRecoverFromTruncatedPartial(t *testing.T) {
+	parts := isolateDownloadState(t)
 	payload := makePayload(4 * recoveryChunkSize)
 	fixture := newMutableRangeFixture(t, payload)
 	databasePath := filepath.Join(t.TempDir(), "argo.db")
 	destination := t.TempDir()
 	download := interruptParallelDownload(t, fixture, databasePath, destination)
-	partial := filepath.Join(destination, ".argo-"+download.ID.String()+".part")
+	partial := filepath.Join(parts, download.ID.String()+".part")
 	if err := os.Truncate(partial, recoveryChunkSize/2); err != nil {
 		t.Fatal(err)
 	}
@@ -94,6 +96,7 @@ func TestParallelChunksRecoverFromTruncatedPartial(t *testing.T) {
 
 func testParallelValidatorChange(t *testing.T, change func(*mutableRangeFixture)) {
 	t.Helper()
+	isolateDownloadState(t)
 	payload := makePayload(4 * recoveryChunkSize)
 	fixture := newMutableRangeFixture(t, payload)
 	databasePath := filepath.Join(t.TempDir(), "argo.db")
