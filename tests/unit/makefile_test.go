@@ -28,11 +28,22 @@ func TestMakefileExposesProjectChecks(t *testing.T) {
 		"test-e2e:",
 		"test-race:",
 		"build:",
+		"run: build",
+		"$(BIN_DIR)/argod $(RUN_ARGS)",
 		"check: format-check vet lint test test-race build",
 		"ci: check",
 	} {
 		if !strings.Contains(makefile, target) {
 			t.Fatalf("Makefile does not contain %q", target)
 		}
+	}
+	phonyRun := false
+	for _, line := range strings.Split(makefile, "\n") {
+		if strings.HasPrefix(line, ".PHONY:") && strings.Contains(" "+line+" ", " run ") {
+			phonyRun = true
+		}
+	}
+	if !phonyRun {
+		t.Fatal("run target is not declared phony")
 	}
 }
