@@ -32,6 +32,17 @@ func (engine *Engine) partialPath(identifier model.DownloadID) string {
 	return filepath.Join(engine.parts, identifier.String()+".part")
 }
 
+func (engine *Engine) RemovePartial(identifier model.DownloadID) error {
+	if _, err := model.ParseDownloadID(identifier.String()); err != nil {
+		return err
+	}
+	if err := os.Remove(engine.partialPath(identifier)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove partial file for download %s: %w", identifier, err)
+	}
+
+	return nil
+}
+
 func (engine *Engine) preparePartial(download model.Download) error {
 	if err := os.MkdirAll(engine.parts, 0o700); err != nil {
 		return fmt.Errorf("create partial directory: %w", err)

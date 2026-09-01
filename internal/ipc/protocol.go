@@ -21,6 +21,8 @@ const (
 	OperationShow     Operation = "show"
 	OperationProfile  Operation = "profile"
 	OperationPolicy   Operation = "policy"
+	OperationRemove   Operation = "remove"
+	OperationClear    Operation = "clear"
 )
 
 type Request struct {
@@ -62,6 +64,10 @@ type DownloadActionRequest struct {
 type DownloadActionResponse struct {
 	ID     string `json:"id"`
 	Status string `json:"status"`
+}
+
+type ClearResponse struct {
+	Removed int `json:"removed"`
 }
 
 type PriorityRequest struct {

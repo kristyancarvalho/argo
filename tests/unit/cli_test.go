@@ -66,6 +66,16 @@ func (client *cliClient) Cancel(_ context.Context, id string) (ipc.DownloadActio
 	return ipc.DownloadActionResponse{ID: id, Status: "canceled"}, nil
 }
 
+func (client *cliClient) Remove(_ context.Context, id string) (ipc.DownloadActionResponse, error) {
+	client.called = "remove:" + id
+	return ipc.DownloadActionResponse{ID: id, Status: "removed"}, nil
+}
+
+func (client *cliClient) Clear(context.Context) (ipc.ClearResponse, error) {
+	client.called = "clear"
+	return ipc.ClearResponse{Removed: 2}, nil
+}
+
 func (client *cliClient) Priority(_ context.Context, id, priority string) (ipc.PriorityResponse, error) {
 	client.called = "priority:" + id + ":" + priority
 	return ipc.PriorityResponse{ID: id, Priority: priority}, nil
@@ -188,6 +198,8 @@ func TestCLICommands(t *testing.T) {
 		{"pause", []string{"pause", "download-id"}, "pause:download-id", "download-id: paused"},
 		{"resume", []string{"resume", "download-id"}, "resume:download-id", "download-id: downloading"},
 		{"cancel", []string{"cancel", "download-id"}, "cancel:download-id", "download-id: canceled"},
+		{"remove", []string{"remove", "download-id"}, "remove:download-id", "download-id: removed"},
+		{"clear", []string{"clear"}, "clear", "Removed 2 historical downloads"},
 		{"priority", []string{"priority", "download-id", "high"}, "priority:download-id:high", "download-id: high"},
 		{"status", []string{"status"}, "status", "Daemon: running"},
 		{"profile", []string{"profile", "gaming"}, "profile:gaming", "Active profile: gaming"},
@@ -223,6 +235,8 @@ func TestCLIRejectsInvalidArguments(t *testing.T) {
 		{"pause"},
 		{"resume"},
 		{"cancel"},
+		{"remove"},
+		{"clear", "extra"},
 		{"priority"},
 		{"priority", "download-id"},
 		{"priority", "download-id", "high", "extra"},
