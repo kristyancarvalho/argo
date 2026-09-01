@@ -160,6 +160,8 @@ func (model Model) View() string {
 		view.WriteString("Daemon: ")
 		view.WriteString(model.status.State)
 		view.WriteString("\n\n")
+		model.renderNetworkAndQoS(&view)
+		view.WriteByte('\n')
 		view.WriteString("  ID                               FILENAME                         PROGRESS       SPEED       ETA      STATUS       PRIORITY\n")
 		if len(model.downloads) == 0 {
 			view.WriteString("  No downloads.\n")
@@ -206,6 +208,61 @@ func (model Model) View() string {
 	view.WriteString("\n↑/k ↓/j select  a add  p pause  r resume  c cancel  1/2/3 priority  q quit\n")
 
 	return view.String()
+}
+
+func (model Model) renderNetworkAndQoS(view *strings.Builder) {
+	networkState := model.status.Network.State
+	if !model.status.Network.Available {
+		networkState = "unavailable"
+	} else if !model.status.Network.Connected {
+		networkState = "disconnected"
+	} else if networkState == "" {
+		networkState = "connected"
+	}
+	_, _ = fmt.Fprintf(
+		view,
+		"Network: %s  Interface: %s  Metered: %s\nProfile: %s  Traffic policy: %s  Argo throughput: %s\n",
+		networkState,
+		statusValue(model.status.Network.Interface),
+		statusValue(model.status.Network.Metered),
+		statusValue(model.status.ActiveProfile),
+		statusValue(model.status.Traffic.Policy),
+		formatTUISpeed(model.totalSpeed()),
+	)
+	if model.status.Traffic.CurrentRateBitsPerSecond > 0 {
+		_, _ = fmt.Fprintf(view, "Adaptive limit: %d bit/s\n", model.status.Traffic.CurrentRateBitsPerSecond)
+	} else {
+		view.WriteString("Adaptive limit: unavailable\n")
+	}
+	if model.status.Traffic.LatencyAvailable {
+		_, _ = fmt.Fprintf(view, "Latency: %s", model.status.Traffic.MeasuredLatency)
+		if model.status.Traffic.BaselineAvailable {
+			_, _ = fmt.Fprintf(view, " (baseline %s)", model.status.Traffic.BaselineLatency)
+		}
+		if model.status.Traffic.ControllerState != "" {
+			_, _ = fmt.Fprintf(view, "  Controller: %s", model.status.Traffic.ControllerState)
+		}
+		view.WriteByte('\n')
+	} else {
+		view.WriteString("Latency: unavailable\n")
+	}
+}
+
+func (model Model) totalSpeed() int64 {
+	var total int64
+	for _, speed := range model.speeds {
+		total += speed
+	}
+
+	return total
+}
+
+func statusValue(value string) string {
+	if value == "" {
+		return "unknown"
+	}
+
+	return value
 }
 
 func (model Model) updateAddInput(message tea.KeyMsg) (tea.Model, tea.Cmd) {

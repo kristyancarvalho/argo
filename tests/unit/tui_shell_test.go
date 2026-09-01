@@ -174,8 +174,50 @@ func TestTUIDownloadListCalculatesSpeedAndETA(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 	updated, _ := model.Update(model.Init()())
 	view := updated.(tui.Model).View()
-	if !strings.Contains(view, "/s") || strings.Contains(view, "speed.bin      1.0KB/10.0KB    --") {
+	if !strings.Contains(view, "/s") || strings.Contains(view, "Argo throughput: --") || strings.Contains(view, "speed.bin      1.0KB/10.0KB    --") {
 		t.Fatalf("speed and ETA were not rendered: %q", view)
+	}
+}
+
+func TestTUINetworkAndQoSConnected(t *testing.T) {
+	model := loadTUIModel(t, &tuiStatusClient{status: ipc.Status{
+		State: "running", Network: ipc.NetworkStatus{
+			Available: true, Connected: true, State: "connected-global", Interface: "wlan0", Metered: "no",
+		}, ActiveProfile: "gaming", Traffic: ipc.TrafficStatus{Policy: "balanced"},
+	}})
+	view := model.View()
+	for _, value := range []string{"Network: connected-global", "Interface: wlan0", "Metered: no", "Profile: gaming", "Traffic policy: balanced"} {
+		if !strings.Contains(view, value) {
+			t.Fatalf("network view %q does not contain %q", view, value)
+		}
+	}
+}
+
+func TestTUINetworkDisconnectedAndQoSUnavailable(t *testing.T) {
+	model := loadTUIModel(t, &tuiStatusClient{status: ipc.Status{
+		State: "running", Network: ipc.NetworkStatus{Available: true, State: "disconnected"},
+	}})
+	view := model.View()
+	for _, value := range []string{"Network: disconnected", "Interface: unknown", "Traffic policy: unknown", "Adaptive limit: unavailable", "Latency: unavailable"} {
+		if !strings.Contains(view, value) {
+			t.Fatalf("unavailable view %q does not contain %q", view, value)
+		}
+	}
+}
+
+func TestTUIAdaptivePolicyActive(t *testing.T) {
+	model := loadTUIModel(t, &tuiStatusClient{status: ipc.Status{
+		State: "running", Network: ipc.NetworkStatus{Available: true, Connected: true}, ActiveProfile: "responsive",
+		Traffic: ipc.TrafficStatus{
+			Policy: "latency", CurrentRateBitsPerSecond: 25_000_000, MeasuredLatency: 24 * time.Millisecond,
+			LatencyAvailable: true, BaselineLatency: 18 * time.Millisecond, BaselineAvailable: true, ControllerState: "stable",
+		},
+	}})
+	view := model.View()
+	for _, value := range []string{"Adaptive limit: 25000000 bit/s", "Latency: 24ms (baseline 18ms)", "Controller: stable"} {
+		if !strings.Contains(view, value) {
+			t.Fatalf("adaptive view %q does not contain %q", view, value)
+		}
 	}
 }
 
