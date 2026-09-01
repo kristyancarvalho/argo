@@ -125,6 +125,8 @@ type Service struct {
 	trafficPolicy      qos.Policy
 	trafficLinkRate    uint64
 	trafficCgroupID    uint64
+	trafficErrorMutex  sync.RWMutex
+	trafficError       string
 	telemetryObserver  TelemetryObserver
 	latencyPolicy      *qos.LatencyPolicy
 }
@@ -325,6 +327,9 @@ func (service *Service) statusResponse() ipc.Status {
 	latencyPolicy := service.latencyPolicy
 	service.profileMutex.RUnlock()
 	status.Traffic.Policy = string(policy)
+	service.trafficErrorMutex.RLock()
+	status.Traffic.Error = service.trafficError
+	service.trafficErrorMutex.RUnlock()
 	if service.trafficController != nil {
 		current, applied := service.trafficController.Current()
 		status.Traffic.Applied = applied
@@ -678,9 +683,16 @@ func (service *Service) setProfile(ctx context.Context, payload json.RawMessage)
 	if err := service.updateSchedulerLimit(ctx, profile.MaximumConcurrentDownloads); err != nil {
 		return ipc.ProfileResponse{}, err
 	}
-	_ = service.reconcileTrafficPolicy(ctx)
+	qosError := service.reconcileTrafficPolicy(ctx)
+	response := profileResponse(profile)
+	if service.trafficController != nil {
+		_, response.PolicyApplied = service.trafficController.Current()
+	}
+	if qosError != nil {
+		response.QoSError = qosError.Error()
+	}
 
-	return profileResponse(profile), nil
+	return response, nil
 }
 
 func (service *Service) updateSchedulerLimit(ctx context.Context, maximum int) error {

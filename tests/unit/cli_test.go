@@ -123,7 +123,51 @@ func TestCLIStatusShowsNetworkAndProfile(t *testing.T) {
 
 func (client *cliClient) Profile(_ context.Context, name string) (ipc.ProfileResponse, error) {
 	client.called = "profile:" + name
-	return ipc.ProfileResponse{Name: name}, nil
+	return ipc.ProfileResponse{Name: name, Policy: "balanced", PolicyApplied: true}, nil
+}
+
+func TestCLIShowsQoSDiagnostics(t *testing.T) {
+	client := &cliClient{}
+	response := ipc.ProfileResponse{Name: "gaming", Policy: "throughput", QoSError: "helper unavailable"}
+	client.called = ""
+	var output bytes.Buffer
+	wrapper := &profileDiagnosticClient{cliClient: client, response: response}
+	if err := cli.Run(context.Background(), wrapper, &output, []string{"profile", "gaming"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []string{"Active profile: gaming", "Traffic policy: throughput (inactive)", "QoS warning: helper unavailable"} {
+		if !strings.Contains(output.String(), value) {
+			t.Fatalf("profile output %q does not contain %q", output.String(), value)
+		}
+	}
+	output.Reset()
+	statusClient := &statusDiagnosticClient{cliClient: client}
+	if err := cli.Run(context.Background(), statusClient, &output, []string{"status"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "QoS error: helper unavailable") {
+		t.Fatalf("status output hid QoS error: %q", output.String())
+	}
+}
+
+type profileDiagnosticClient struct {
+	*cliClient
+	response ipc.ProfileResponse
+}
+
+func (client *profileDiagnosticClient) Profile(context.Context, string) (ipc.ProfileResponse, error) {
+	return client.response, nil
+}
+
+type statusDiagnosticClient struct {
+	*cliClient
+}
+
+func (client *statusDiagnosticClient) Status(context.Context) (ipc.Status, error) {
+	status, err := client.cliClient.Status(context.Background())
+	status.Traffic.Error = "helper unavailable"
+
+	return status, err
 }
 
 func (client *cliClient) Policy(_ context.Context, policy string) (ipc.PolicyResponse, error) {

@@ -279,6 +279,10 @@ func (model Model) renderNetworkAndQoS(view *strings.Builder) {
 	} else {
 		view.WriteString("Adaptive limit: unavailable\n")
 	}
+	if model.status.Traffic.Error != "" {
+		view.WriteString(console.Paint(model.color, console.Red, "QoS error: "+model.status.Traffic.Error))
+		view.WriteByte('\n')
+	}
 	if model.status.Traffic.LatencyAvailable {
 		_, _ = fmt.Fprintf(view, "Latency: %s", model.status.Traffic.MeasuredLatency)
 		if model.status.Traffic.BaselineAvailable {

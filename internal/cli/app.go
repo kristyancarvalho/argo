@@ -130,7 +130,22 @@ func runProfile(ctx context.Context, client Client, output io.Writer, arguments 
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(output, "Active profile: %s\n", profile.Name)
+	state := "inactive"
+	if profile.PolicyApplied {
+		state = "active"
+	}
+	if _, err = fmt.Fprintf(
+		output,
+		"Active profile: %s\nTraffic policy: %s (%s)\n",
+		profile.Name,
+		statusValue(profile.Policy),
+		state,
+	); err != nil {
+		return err
+	}
+	if profile.QoSError != "" {
+		_, err = fmt.Fprintf(output, "QoS warning: %s\n", profile.QoSError)
+	}
 
 	return err
 }
@@ -283,6 +298,11 @@ func runStatus(ctx context.Context, client Client, output io.Writer, arguments [
 		shaping,
 	); err != nil {
 		return err
+	}
+	if status.Traffic.Error != "" {
+		if _, err = fmt.Fprintf(output, "QoS error: %s\n", status.Traffic.Error); err != nil {
+			return err
+		}
 	}
 	if status.Traffic.CurrentRateBitsPerSecond > 0 {
 		if _, err = fmt.Fprintf(

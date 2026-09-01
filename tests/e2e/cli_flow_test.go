@@ -56,13 +56,10 @@ func TestCLIBasicDownloadFlow(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(configDirectory, "argo"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	profileConfig := []byte(`[profiles.gaming]
-download_limit = "0"
-default_priority = "high"
-max_concurrent_downloads = 2
-pause_on_metered = true
-resume_after_metered = true
-`)
+	profileConfig, err := os.ReadFile(filepath.Join(root, "tests", "fixtures", "profiles", "qos.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(configDirectory, "argo", "config.toml"), profileConfig, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -98,11 +95,11 @@ resume_after_metered = true
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	profileOutput, err := executeCLI(ctx, argoBinary, destination, environment, "profile", "gaming")
+	profileOutput, err := executeCLI(ctx, argoBinary, destination, environment, "profile", "focused")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(profileOutput, "Active profile: gaming") {
+	if !strings.Contains(profileOutput, "Active profile: focused") || !strings.Contains(profileOutput, "Traffic policy: throughput") {
 		t.Fatalf("unexpected profile output %q", profileOutput)
 	}
 	unknownOutput, err := executeCLI(ctx, argoBinary, destination, environment, "profile", "missing")

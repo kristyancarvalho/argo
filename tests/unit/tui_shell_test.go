@@ -247,6 +247,15 @@ func TestTUIAdaptivePolicyActive(t *testing.T) {
 	}
 }
 
+func TestTUIShowsQoSError(t *testing.T) {
+	model := loadTUIModel(t, &tuiStatusClient{status: ipc.Status{
+		State: "running", Traffic: ipc.TrafficStatus{Policy: "throughput", Error: "helper unavailable"},
+	}})
+	if !strings.Contains(model.View(), "QoS error: helper unavailable") {
+		t.Fatalf("QoS error is missing from TUI: %q", model.View())
+	}
+}
+
 func TestTUIActionsDispatch(t *testing.T) {
 	client := &tuiStatusClient{status: ipc.Status{State: "running"}, downloads: [][]ipc.Download{{{ID: "one"}}}}
 	model := loadTUIModel(t, client)

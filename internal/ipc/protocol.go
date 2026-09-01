@@ -90,6 +90,8 @@ type ProfileResponse struct {
 	PauseOnMetered         bool   `json:"pause_on_metered"`
 	ResumeAfterMetered     bool   `json:"resume_after_metered"`
 	Policy                 string `json:"policy"`
+	PolicyApplied          bool   `json:"policy_applied"`
+	QoSError               string `json:"qos_error"`
 }
 
 type PolicyRequest struct {
