@@ -221,6 +221,47 @@ func runStatus(ctx context.Context, client Client, output io.Writer, arguments [
 		statusValue(status.Network.Metered),
 		statusValue(status.ActiveProfile),
 	)
+	if err != nil {
+		return err
+	}
+	shaping := "inactive"
+	if status.Traffic.Applied {
+		shaping = "active"
+	}
+	if _, err = fmt.Fprintf(
+		output,
+		"Traffic policy: %s\nQoS shaping: %s\n",
+		statusValue(status.Traffic.Policy),
+		shaping,
+	); err != nil {
+		return err
+	}
+	if status.Traffic.CurrentRateBitsPerSecond > 0 {
+		if _, err = fmt.Fprintf(
+			output,
+			"Current limit: %d bit/s\n",
+			status.Traffic.CurrentRateBitsPerSecond,
+		); err != nil {
+			return err
+		}
+	}
+	if status.Traffic.Policy == "latency" {
+		latency := "unavailable"
+		if status.Traffic.LatencyAvailable {
+			latency = status.Traffic.MeasuredLatency.String()
+		}
+		baseline := "unavailable"
+		if status.Traffic.BaselineAvailable {
+			baseline = status.Traffic.BaselineLatency.String()
+		}
+		_, err = fmt.Fprintf(
+			output,
+			"Measured latency: %s\nBaseline latency: %s\nController: %s\n",
+			latency,
+			baseline,
+			statusValue(status.Traffic.ControllerState),
+		)
+	}
 
 	return err
 }
