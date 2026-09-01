@@ -59,7 +59,7 @@ func Run(ctx context.Context, client Client, output io.Writer, arguments []strin
 
 func runPolicy(ctx context.Context, client Client, output io.Writer, arguments []string) error {
 	if len(arguments) != 1 {
-		return UsageError{Message: "argo policy <off|balanced|throughput|focus>"}
+		return UsageError{Message: "argo policy <off|balanced|throughput|latency|focus>"}
 	}
 	policy, err := client.Policy(ctx, arguments[0])
 	if err != nil {

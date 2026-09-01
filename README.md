@@ -42,7 +42,7 @@ policy = "latency"
 ```
 
 Configuration is loaded at daemon startup. Restart `argod` after editing the file.
-Select a configured profile at runtime with `argo profile <name>`. Select system traffic shaping with `argo policy <off|balanced|throughput|focus>`. Download rates use bytes per second, while `qos.link_rate` is the connection capacity in bits per second. `K`, `M`, and `G` are decimal suffixes; a positive link rate is required while shaping active downloads. The active profile is persisted across daemon restarts.
+Select a configured profile at runtime with `argo profile <name>`. Select system traffic shaping with `argo policy <off|balanced|throughput|latency|focus>`. Download rates use bytes per second, while `qos.link_rate` is the connection capacity in bits per second. `K`, `M`, and `G` are decimal suffixes; a positive link rate is required while shaping active downloads. The active profile is persisted across daemon restarts.
 
 ## systemd
 
