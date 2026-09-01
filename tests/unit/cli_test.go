@@ -114,6 +114,11 @@ func (client *cliClient) Profile(_ context.Context, name string) (ipc.ProfileRes
 	return ipc.ProfileResponse{Name: name}, nil
 }
 
+func (client *cliClient) Policy(_ context.Context, policy string) (ipc.PolicyResponse, error) {
+	client.called = "policy:" + policy
+	return ipc.PolicyResponse{Policy: policy, Applied: policy != "off"}, nil
+}
+
 func TestCLICommands(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -130,6 +135,8 @@ func TestCLICommands(t *testing.T) {
 		{"priority", []string{"priority", "download-id", "high"}, "priority:download-id:high", "download-id: high"},
 		{"status", []string{"status"}, "status", "Daemon: running"},
 		{"profile", []string{"profile", "gaming"}, "profile:gaming", "Active profile: gaming"},
+		{"policy", []string{"policy", "balanced"}, "policy:balanced", "Traffic policy: balanced (active)"},
+		{"policy off", []string{"policy", "off"}, "policy:off", "Traffic policy: off (inactive)"},
 	}
 
 	for _, test := range tests {
@@ -167,6 +174,8 @@ func TestCLIRejectsInvalidArguments(t *testing.T) {
 		{"status", "extra"},
 		{"profile"},
 		{"profile", "one", "two"},
+		{"policy"},
+		{"policy", "off", "extra"},
 	}
 
 	for _, arguments := range tests {

@@ -16,6 +16,8 @@ import (
 	"github.com/kristyancarvalho/argo/internal/downloader"
 	"github.com/kristyancarvalho/argo/internal/ipc"
 	"github.com/kristyancarvalho/argo/internal/network"
+	"github.com/kristyancarvalho/argo/internal/qos"
+	"github.com/kristyancarvalho/argo/internal/qosipc"
 	"github.com/kristyancarvalho/argo/internal/storage"
 )
 
@@ -32,6 +34,14 @@ func run(arguments []string) (runError error) {
 		return err
 	}
 	configuredRate, err := config.ParseRate(configuration.Download.RateLimit)
+	if err != nil {
+		return err
+	}
+	configuredLinkRate, err := config.ParseRate(configuration.QoS.LinkRate)
+	if err != nil {
+		return err
+	}
+	policy, err := qos.ParsePolicy(configuration.QoS.Policy)
 	if err != nil {
 		return err
 	}
@@ -92,6 +102,7 @@ func run(arguments []string) (runError error) {
 	if *resumeAfterMetered && !*pauseOnMetered {
 		return fmt.Errorf("resume after metered requires pause on metered")
 	}
+	cgroupID, _ := qos.CurrentCgroupID()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -134,6 +145,10 @@ func run(arguments []string) (runError error) {
 		ResumeAfterMetered:         *resumeAfterMetered,
 		DefaultPriority:            configuration.Download.DefaultPriority,
 		Profiles:                   profiles,
+		TrafficPolicy:              policy,
+		TrafficLinkRate:            uint64(configuredLinkRate),
+		TrafficCgroupID:            cgroupID,
+		TrafficBackend:             qosipc.NewClient(qosipc.DefaultSocketPath),
 	})
 	if err != nil {
 		return err

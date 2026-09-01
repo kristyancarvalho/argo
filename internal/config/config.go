@@ -39,7 +39,8 @@ type Network struct {
 }
 
 type QoS struct {
-	Policy string `toml:"policy"`
+	Policy   string `toml:"policy"`
+	LinkRate string `toml:"link_rate"`
 }
 
 type Profile struct {
@@ -79,7 +80,7 @@ func Defaults() Config {
 			RateLimit:              "0",
 		},
 		Network:  Network{},
-		QoS:      QoS{Policy: "off"},
+		QoS:      QoS{Policy: "off", LinkRate: "0"},
 		Profiles: make(map[string]Profile),
 	}
 }
@@ -158,6 +159,9 @@ func (configuration Config) Validate() error {
 	case "off", "balanced", "throughput", "latency", "focus":
 	default:
 		return ValidationError{Field: "qos.policy", Reason: "is not recognized"}
+	}
+	if _, err := ParseRate(configuration.QoS.LinkRate); err != nil {
+		return ValidationError{Field: "qos.link_rate", Reason: err.Error()}
 	}
 	for name := range configuration.Profiles {
 		if _, err := configuration.Profile(name); err != nil {
