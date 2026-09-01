@@ -23,6 +23,7 @@ const (
 	OperationPolicy   Operation = "policy"
 	OperationRemove   Operation = "remove"
 	OperationClear    Operation = "clear"
+	OperationRetry    Operation = "retry"
 )
 
 type Request struct {

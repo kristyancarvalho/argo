@@ -69,6 +69,15 @@ func (client *Client) Clear(ctx context.Context) (ClearResponse, error) {
 	return response, nil
 }
 
+func (client *Client) Retry(ctx context.Context, id string) (AddResponse, error) {
+	var response AddResponse
+	if err := client.Call(ctx, OperationRetry, DownloadActionRequest{ID: id}, &response); err != nil {
+		return AddResponse{}, err
+	}
+
+	return response, nil
+}
+
 func (client *Client) Priority(ctx context.Context, id, priority string) (PriorityResponse, error) {
 	var response PriorityResponse
 	if err := client.Call(ctx, OperationPriority, PriorityRequest{

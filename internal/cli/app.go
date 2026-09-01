@@ -18,6 +18,7 @@ type Client interface {
 	Cancel(context.Context, string) (ipc.DownloadActionResponse, error)
 	Remove(context.Context, string) (ipc.DownloadActionResponse, error)
 	Clear(context.Context) (ipc.ClearResponse, error)
+	Retry(context.Context, string) (ipc.AddResponse, error)
 	Priority(context.Context, string, string) (ipc.PriorityResponse, error)
 	Status(context.Context) (ipc.Status, error)
 	Profile(context.Context, string) (ipc.ProfileResponse, error)
@@ -57,6 +58,8 @@ func RunWithOptions(ctx context.Context, client Client, output io.Writer, argume
 		return runAction(ctx, client.Remove, output, command, operands)
 	case "clear":
 		return runClear(ctx, client, output, operands)
+	case "retry":
+		return runRetry(ctx, client, output, operands)
 	case "priority":
 		return runPriority(ctx, client, output, operands)
 	case "watch":
@@ -90,6 +93,7 @@ Commands:
   cancel <id>                       Cancel a download
   remove <id>                       Remove a historical download
   clear                             Clear completed, failed, and canceled history
+  retry <id>                        Start a new transfer from historical source
   priority <id> <low|normal|high>   Order queued Argo downloads
   watch                             Stream download progress
   status                            Show daemon, network, and QoS state
@@ -108,6 +112,9 @@ Traffic policies:
 Priorities only order queued downloads inside Argo. Policies control how Argo
 competes with other applications and require an active download, a configured
 link rate, a connected interface, and the privileged argo-qosd helper.
+
+Resume preserves a transfer ID and requires valid partial data. Retry creates a
+new transfer ID from completed, failed, or canceled history.
 `)
 
 	return err
@@ -180,6 +187,19 @@ func runClear(ctx context.Context, client Client, output io.Writer, arguments []
 		return err
 	}
 	_, err = fmt.Fprintf(output, "Removed %d historical downloads\n", response.Removed)
+
+	return err
+}
+
+func runRetry(ctx context.Context, client Client, output io.Writer, arguments []string) error {
+	if len(arguments) != 1 {
+		return UsageError{Message: "argo retry <id>"}
+	}
+	response, err := client.Retry(ctx, arguments[0])
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(output, "Added %s %s (%s)\n", response.ID, response.Filename, response.Status)
 
 	return err
 }

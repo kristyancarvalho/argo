@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -38,6 +39,7 @@ type Engine struct {
 	chunkCount int
 	observer   func(model.DownloadID, ChunkProgress)
 	parts      string
+	strict     sync.Map
 }
 
 type Options struct {
