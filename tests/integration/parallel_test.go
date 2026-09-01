@@ -155,6 +155,8 @@ func TestParallelDownloadCancellation(t *testing.T) {
 func TestParallelDownloadDoesNotWaitForSlowChunkToStartOthers(t *testing.T) {
 	payload := makePayload(4096)
 	fastCompleted := make(chan struct{}, 3)
+	slowStarted := make(chan struct{})
+	releaseSlow := make(chan struct{})
 	server := parallelServer(t, payload, func(
 		response http.ResponseWriter,
 		_ *http.Request,
@@ -162,7 +164,8 @@ func TestParallelDownloadDoesNotWaitForSlowChunkToStartOthers(t *testing.T) {
 		end int64,
 	) {
 		if start == 0 {
-			time.Sleep(100 * time.Millisecond)
+			close(slowStarted)
+			<-releaseSlow
 		} else {
 			fastCompleted <- struct{}{}
 		}
@@ -177,10 +180,18 @@ func TestParallelDownloadDoesNotWaitForSlowChunkToStartOthers(t *testing.T) {
 		finished <- engine.Download(context.Background(), download)
 	}()
 	select {
+	case <-slowStarted:
+	case <-time.After(3 * time.Second):
+		close(releaseSlow)
+		t.Fatal("slow chunk did not start")
+	}
+	select {
 	case <-fastCompleted:
-	case <-time.After(80 * time.Millisecond):
+	case <-time.After(3 * time.Second):
+		close(releaseSlow)
 		t.Fatal("fast chunks did not run while a chunk was slow")
 	}
+	close(releaseSlow)
 	if err := <-finished; err != nil {
 		t.Fatal(err)
 	}

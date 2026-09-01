@@ -51,6 +51,8 @@ max_rate = "80M"
 Configuration is loaded at daemon startup. Restart `argod` after editing the file.
 Select a configured profile at runtime with `argo profile <name>`. Select system traffic shaping with `argo policy <off|balanced|throughput|latency|focus>`. Download rates use bytes per second, while `qos.link_rate`, `min_rate`, and `max_rate` use bits per second. `K`, `M`, and `G` are decimal suffixes. Latency policy profiles can override the acceptable latency increase and rate bounds. Set `qos.probe_target` to a safe `host:port` endpoint to collect TCP-connect latency; an empty target produces missing telemetry and the bounded fallback behavior. The active profile is persisted across daemon restarts.
 
+Run `argo tui` for the optional terminal interface. It connects to the existing user daemon, and exiting the interface does not stop active downloads.
+
 ## systemd
 
 Install `packaging/systemd/argod.service` under the user unit directory and `packaging/systemd/argo-qosd@.service` under the system unit directory. Start the downloader for the current user with `systemctl --user enable --now argod.service`.

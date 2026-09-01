@@ -7,6 +7,7 @@ import (
 
 	"github.com/kristyancarvalho/argo/internal/cli"
 	"github.com/kristyancarvalho/argo/internal/ipc"
+	"github.com/kristyancarvalho/argo/internal/tui"
 )
 
 func main() {
@@ -22,5 +23,15 @@ func run(arguments []string) error {
 		return err
 	}
 
-	return cli.Run(context.Background(), ipc.NewClient(socketPath), os.Stdout, arguments)
+	ctx := context.Background()
+	client := ipc.NewClient(socketPath)
+	if len(arguments) > 0 && arguments[0] == "tui" {
+		if len(arguments) != 1 {
+			return cli.UsageError{Message: "argo tui"}
+		}
+
+		return tui.Run(ctx, client, os.Stdin, os.Stdout)
+	}
+
+	return cli.Run(ctx, client, os.Stdout, arguments)
 }
