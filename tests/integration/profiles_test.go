@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/kristyancarvalho/argo/internal/daemon"
 	"github.com/kristyancarvalho/argo/internal/ipc"
 	"github.com/kristyancarvalho/argo/internal/model"
 	"github.com/kristyancarvalho/argo/internal/network"
+	"github.com/kristyancarvalho/argo/internal/qos"
+	"github.com/kristyancarvalho/argo/internal/telemetry"
 )
 
 func TestProfileSwitchAppliesAndPersistsSettings(t *testing.T) {
@@ -51,6 +54,67 @@ func TestProfileSwitchAppliesAndPersistsSettings(t *testing.T) {
 	engine.release("waiting")
 	assertStartedDownload(t, engine, configured)
 	engine.release("configured")
+}
+
+func TestAdaptiveProfileSwitchReconcilesActiveDownload(t *testing.T) {
+	store := openTestStore(t)
+	engine := newControlledDownloadEngine(store, "adaptive-profile")
+	observer := newControlledNetworkObserver()
+	backend := &trafficPolicyBackend{}
+	low := newProfileLatencyPolicy(t, 10_000_000, 40_000_000)
+	high := newProfileLatencyPolicy(t, 20_000_000, 70_000_000)
+	service, err := daemon.NewServiceWithOptions(context.Background(), store, engine, daemon.ServiceOptions{
+		MaximumConcurrentDownloads: 1,
+		NetworkObserver:            observer,
+		TrafficLinkRate:            100_000_000,
+		TrafficCgroupID:            42,
+		TrafficBackend:             backend,
+		Profiles: map[string]daemon.Profile{
+			"responsive": {
+				Name: "responsive", BytesPerSecond: 1, DefaultPriority: model.PriorityNormal,
+				MaximumConcurrentDownloads: 1, Policy: "latency", LatencyPolicy: low,
+			},
+			"fast": {
+				Name: "fast", BytesPerSecond: 1, DefaultPriority: model.PriorityNormal,
+				MaximumConcurrentDownloads: 1, Policy: "latency", LatencyPolicy: high,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeSchedulerService(t, service)
+	observer.send(t, network.Snapshot{Connected: true, Interface: "eth0"})
+	identifier := addScheduledDownload(t, service, "adaptive-profile")
+	assertStartedDownload(t, engine, identifier)
+	switchProfile(t, service, "responsive")
+	waitForTrafficPolicy(t, backend, qos.PolicyLatency, 40_000_000)
+	switchProfile(t, service, "fast")
+	waitForTrafficPolicy(t, backend, qos.PolicyLatency, 70_000_000)
+	engine.release("adaptive-profile")
+}
+
+func newProfileLatencyPolicy(t *testing.T, minimum, maximum uint64) *qos.LatencyPolicy {
+	t.Helper()
+	baseline, err := telemetry.NewBaselineEstimator(telemetry.BaselineOptions{Manual: 20 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	controller, err := qos.NewAdaptiveController(qos.AdaptiveOptions{
+		MinimumRateBitsPerSecond: minimum, MaximumRateBitsPerSecond: maximum,
+		InitialRateBitsPerSecond: maximum, IncreaseStepBitsPerSecond: 1,
+		DecreaseStepBitsPerSecond: 1, AcceptableLatencyIncrease: 10 * time.Millisecond,
+		RequiredSamples: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, err := qos.NewLatencyPolicy(baseline, controller)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return policy
 }
 
 func TestUnknownProfileIsRejected(t *testing.T) {

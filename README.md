@@ -31,6 +31,10 @@ resume_after_metered = false
 [qos]
 policy = "off"
 link_rate = "0"
+latency_target = "20ms"
+probe_target = ""
+probe_timeout = "1s"
+sample_interval = "1s"
 
 [profiles.gaming]
 download_limit = "30M"
@@ -39,16 +43,23 @@ max_concurrent_downloads = 2
 pause_on_metered = true
 resume_after_metered = true
 policy = "latency"
+latency_target = "15ms"
+min_rate = "10M"
+max_rate = "80M"
 ```
 
 Configuration is loaded at daemon startup. Restart `argod` after editing the file.
-Select a configured profile at runtime with `argo profile <name>`. Select system traffic shaping with `argo policy <off|balanced|throughput|focus>`. Download rates use bytes per second, while `qos.link_rate` is the connection capacity in bits per second. `K`, `M`, and `G` are decimal suffixes; a positive link rate is required while shaping active downloads. The active profile is persisted across daemon restarts.
+Select a configured profile at runtime with `argo profile <name>`. Select system traffic shaping with `argo policy <off|balanced|throughput|latency|focus>`. Download rates use bytes per second, while `qos.link_rate`, `min_rate`, and `max_rate` use bits per second. `K`, `M`, and `G` are decimal suffixes. Latency policy profiles can override the acceptable latency increase and rate bounds. Set `qos.probe_target` to a safe `host:port` endpoint to collect TCP-connect latency; an empty target produces missing telemetry and the bounded fallback behavior. The active profile is persisted across daemon restarts.
 
 ## systemd
 
 Install `packaging/systemd/argod.service` under the user unit directory and `packaging/systemd/argo-qosd@.service` under the system unit directory. Start the downloader for the current user with `systemctl --user enable --now argod.service`.
 
 The QoS helper is a system service template. Start exactly one instance for the account running `argod`, for example `systemctl enable --now argo-qosd@alice.service`. The helper runs as that account with only `CAP_NET_ADMIN`; `argod` remains unprivileged. It owns the Argo nftables table and traffic-control tree used by active traffic policies.
+
+## Development
+
+Run the complete local CI-equivalent suite with `make check`. Individual targets include `format`, `format-check`, `vet`, `lint`, `test-unit`, `test-integration`, `test-e2e`, `test-race`, and `build`.
 
 ## License
 

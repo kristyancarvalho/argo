@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/kristyancarvalho/argo/internal/config"
 	"github.com/kristyancarvalho/argo/internal/daemon"
@@ -19,6 +20,7 @@ import (
 	"github.com/kristyancarvalho/argo/internal/qos"
 	"github.com/kristyancarvalho/argo/internal/qosipc"
 	"github.com/kristyancarvalho/argo/internal/storage"
+	"github.com/kristyancarvalho/argo/internal/telemetry"
 )
 
 func main() {
@@ -45,9 +47,31 @@ func run(arguments []string) (runError error) {
 	if err != nil {
 		return err
 	}
+	adaptiveSettings, err := configuration.Adaptive()
+	if err != nil {
+		return err
+	}
+	latencyPolicy, err := newLatencyPolicy(
+		adaptiveSettings.LatencyTarget,
+		adaptiveSettings.MinimumRate,
+		adaptiveSettings.MaximumRate,
+		adaptiveSettings.ManualBaseline,
+	)
+	if err != nil {
+		return err
+	}
 	profiles := make(map[string]daemon.Profile, len(configuration.Profiles))
 	for name := range configuration.Profiles {
 		profile, err := configuration.Profile(name)
+		if err != nil {
+			return err
+		}
+		profileLatencyPolicy, err := newLatencyPolicy(
+			profile.LatencyTarget,
+			profile.MinimumRate,
+			profile.MaximumRate,
+			adaptiveSettings.ManualBaseline,
+		)
 		if err != nil {
 			return err
 		}
@@ -59,6 +83,7 @@ func run(arguments []string) (runError error) {
 			PauseOnMetered:             profile.PauseOnMetered,
 			ResumeAfterMetered:         profile.ResumeAfterMetered,
 			Policy:                     profile.Policy,
+			LatencyPolicy:              profileLatencyPolicy,
 		}
 	}
 	flags := flag.NewFlagSet("argod", flag.ContinueOnError)
@@ -122,6 +147,27 @@ func run(arguments []string) (runError error) {
 	defer func() {
 		runError = errors.Join(runError, store.Close())
 	}()
+	var latencyProbe telemetry.LatencyProbe
+	if adaptiveSettings.ProbeTarget != "" {
+		latencyProbe, err = telemetry.NewTCPProbe(
+			adaptiveSettings.ProbeTarget,
+			adaptiveSettings.ProbeTimeout,
+		)
+		if err != nil {
+			return err
+		}
+	}
+	var telemetryObserver daemon.TelemetryObserver
+	if adaptiveSettings.MaximumRate > 0 {
+		telemetryObserver, err = telemetry.NewObserver(
+			store,
+			telemetry.NewCollector(telemetry.NewSampler(0), latencyProbe),
+			adaptiveSettings.SampleInterval,
+		)
+		if err != nil {
+			return err
+		}
+	}
 	engine, err := downloader.NewWithOptions(store, downloader.Options{
 		HTTPClient:     http.DefaultClient,
 		BytesPerSecond: *rateLimit,
@@ -149,6 +195,8 @@ func run(arguments []string) (runError error) {
 		TrafficLinkRate:            uint64(configuredLinkRate),
 		TrafficCgroupID:            cgroupID,
 		TrafficBackend:             qosipc.NewClient(qosipc.DefaultSocketPath),
+		TelemetryObserver:          telemetryObserver,
+		LatencyPolicy:              latencyPolicy,
 	})
 	if err != nil {
 		return err
@@ -162,4 +210,42 @@ func run(arguments []string) (runError error) {
 	}
 
 	return server.Serve(ctx)
+}
+
+func newLatencyPolicy(
+	target time.Duration,
+	minimum uint64,
+	maximum uint64,
+	manualBaseline time.Duration,
+) (*qos.LatencyPolicy, error) {
+	if minimum == 0 && maximum == 0 {
+		return nil, nil
+	}
+	span := maximum - minimum
+	increaseStep := span / 20
+	decreaseStep := span / 10
+	if increaseStep == 0 {
+		increaseStep = 1
+	}
+	if decreaseStep == 0 {
+		decreaseStep = 1
+	}
+	baseline, err := telemetry.NewBaselineEstimator(telemetry.BaselineOptions{Manual: manualBaseline})
+	if err != nil {
+		return nil, err
+	}
+	controller, err := qos.NewAdaptiveController(qos.AdaptiveOptions{
+		MinimumRateBitsPerSecond:  minimum,
+		MaximumRateBitsPerSecond:  maximum,
+		InitialRateBitsPerSecond:  maximum,
+		IncreaseStepBitsPerSecond: increaseStep,
+		DecreaseStepBitsPerSecond: decreaseStep,
+		AcceptableLatencyIncrease: target,
+		RequiredSamples:           3,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return qos.NewLatencyPolicy(baseline, controller)
 }

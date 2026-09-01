@@ -19,6 +19,7 @@ import (
 	"github.com/kristyancarvalho/argo/internal/network"
 	"github.com/kristyancarvalho/argo/internal/qos"
 	"github.com/kristyancarvalho/argo/internal/scheduler"
+	"github.com/kristyancarvalho/argo/internal/telemetry"
 )
 
 const DefaultMaximumConcurrentDownloads = 3
@@ -49,6 +50,10 @@ type NetworkObserver interface {
 	Observe(context.Context, func(network.Snapshot) error) error
 }
 
+type TelemetryObserver interface {
+	Observe(context.Context, func(telemetry.Snapshot) error) error
+}
+
 type ServiceOptions struct {
 	MaximumConcurrentDownloads int
 	NetworkObserver            NetworkObserver
@@ -60,6 +65,8 @@ type ServiceOptions struct {
 	TrafficLinkRate            uint64
 	TrafficCgroupID            uint64
 	TrafficBackend             qos.Backend
+	TelemetryObserver          TelemetryObserver
+	LatencyPolicy              *qos.LatencyPolicy
 }
 
 type Profile struct {
@@ -70,6 +77,7 @@ type Profile struct {
 	PauseOnMetered             bool
 	ResumeAfterMetered         bool
 	Policy                     string
+	LatencyPolicy              *qos.LatencyPolicy
 }
 
 type priorityUpdate struct {
@@ -117,6 +125,8 @@ type Service struct {
 	trafficPolicy      qos.Policy
 	trafficLinkRate    uint64
 	trafficCgroupID    uint64
+	telemetryObserver  TelemetryObserver
+	latencyPolicy      *qos.LatencyPolicy
 }
 
 func NewService(parent context.Context, store Store, engine DownloadEngine) (*Service, error) {
@@ -195,6 +205,7 @@ func NewServiceWithOptions(
 		options.PauseOnMetered = profile.PauseOnMetered
 		options.ResumeAfterMetered = profile.ResumeAfterMetered
 		options.TrafficPolicy = qos.Policy(profile.Policy)
+		options.LatencyPolicy = profile.LatencyPolicy
 	}
 	if len(profiles) > 0 && (!supportsProfiles || !controlsRate) {
 		return nil, fmt.Errorf("service dependencies cannot apply profiles")
@@ -248,12 +259,18 @@ func NewServiceWithOptions(
 		trafficPolicy:      options.TrafficPolicy,
 		trafficLinkRate:    options.TrafficLinkRate,
 		trafficCgroupID:    options.TrafficCgroupID,
+		telemetryObserver:  options.TelemetryObserver,
+		latencyPolicy:      options.LatencyPolicy,
 	}
 	service.waitGroup.Add(1)
 	go service.runScheduler()
 	if service.networkObserver != nil {
 		service.waitGroup.Add(1)
 		go service.runNetworkObserver()
+	}
+	if service.telemetryObserver != nil {
+		service.waitGroup.Add(1)
+		go service.runTelemetryObserver()
 	}
 
 	return service, nil
@@ -304,7 +321,26 @@ func (service *Service) statusResponse() ipc.Status {
 	}
 	service.profileMutex.RLock()
 	status.ActiveProfile = service.activeProfile
+	policy := service.trafficPolicy
+	latencyPolicy := service.latencyPolicy
 	service.profileMutex.RUnlock()
+	status.Traffic.Policy = string(policy)
+	if service.trafficController != nil {
+		current, applied := service.trafficController.Current()
+		status.Traffic.Applied = applied
+		if applied {
+			status.Traffic.CurrentRateBitsPerSecond = current.ArgoRateBitsPerSecond
+		}
+	}
+	if policy == qos.PolicyLatency && latencyPolicy != nil {
+		diagnostics := latencyPolicy.Diagnostics(time.Now().UTC())
+		status.Traffic.CurrentRateBitsPerSecond = diagnostics.State.RateBitsPerSecond
+		status.Traffic.MeasuredLatency = diagnostics.MeasuredLatency
+		status.Traffic.LatencyAvailable = diagnostics.LatencyAvailable
+		status.Traffic.BaselineLatency = diagnostics.BaselineLatency
+		status.Traffic.BaselineAvailable = diagnostics.BaselineAvailable
+		status.Traffic.ControllerState = string(diagnostics.State.Reason)
+	}
 
 	return status
 }
@@ -637,6 +673,7 @@ func (service *Service) setProfile(ctx context.Context, payload json.RawMessage)
 	service.pauseOnMetered = profile.PauseOnMetered
 	service.resumeAfterMetered = profile.ResumeAfterMetered
 	service.trafficPolicy = qos.Policy(profile.Policy)
+	service.latencyPolicy = profile.LatencyPolicy
 	service.profileMutex.Unlock()
 	if err := service.updateSchedulerLimit(ctx, profile.MaximumConcurrentDownloads); err != nil {
 		return ipc.ProfileResponse{}, err

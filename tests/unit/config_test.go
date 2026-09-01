@@ -2,10 +2,12 @@ package unit_test
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/kristyancarvalho/argo/internal/config"
 	"github.com/kristyancarvalho/argo/internal/model"
@@ -25,6 +27,67 @@ func TestConfigurationDefaultsAndReloadStrategy(t *testing.T) {
 	}
 	if configuration.ReloadStrategy() != config.ReloadOnRestart {
 		t.Fatalf("reload strategy is %q, expected restart", configuration.ReloadStrategy())
+	}
+}
+
+func TestAdaptiveProfileConfiguration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	content := []byte(`[qos]
+policy = "balanced"
+link_rate = "100M"
+latency_target = "20ms"
+probe_target = "example.test:443"
+probe_timeout = "750ms"
+sample_interval = "2s"
+
+[profiles.responsive]
+policy = "latency"
+latency_target = "12ms"
+min_rate = "15M"
+max_rate = "70M"
+`)
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	configuration, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile, err := configuration.Profile("responsive")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.Policy != "latency" || profile.LatencyTarget != 12*time.Millisecond ||
+		profile.MinimumRate != 15_000_000 || profile.MaximumRate != 70_000_000 {
+		t.Fatalf("unexpected adaptive profile: %+v", profile)
+	}
+	adaptive, err := configuration.Adaptive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if adaptive.ProbeTarget != "example.test:443" || adaptive.ProbeTimeout != 750*time.Millisecond ||
+		adaptive.SampleInterval != 2*time.Second || adaptive.MinimumRate != 10_000_000 ||
+		adaptive.MaximumRate != 80_000_000 {
+		t.Fatalf("unexpected adaptive defaults: %+v", adaptive)
+	}
+}
+
+func TestAdaptiveProfileValidation(t *testing.T) {
+	tests := []string{
+		"[qos]\nlatency_target = \"fast\"\n",
+		"[qos]\nprobe_target = \"missing-port\"\n",
+		"[qos]\nlink_rate = \"100M\"\nmin_rate = \"90M\"\nmax_rate = \"80M\"\n",
+		"[qos]\nlink_rate = \"100M\"\n[profiles.bad]\nlatency_target = \"0ms\"\n",
+		"[qos]\nlink_rate = \"100M\"\n[profiles.bad]\nmin_rate = \"20M\"\nmax_rate = \"110M\"\n",
+	}
+	for index, content := range tests {
+		path := filepath.Join(t.TempDir(), fmt.Sprintf("invalid-adaptive-%d.toml", index))
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := config.Load(path); err == nil {
+			t.Fatalf("invalid adaptive configuration %q was accepted", content)
+		}
 	}
 }
 
