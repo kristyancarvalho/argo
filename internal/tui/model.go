@@ -21,6 +21,8 @@ type Client interface {
 	Resume(context.Context, string) (ipc.DownloadActionResponse, error)
 	Cancel(context.Context, string) (ipc.DownloadActionResponse, error)
 	Priority(context.Context, string, string) (ipc.PriorityResponse, error)
+	Profile(context.Context, string) (ipc.ProfileResponse, error)
+	Policy(context.Context, string) (ipc.PolicyResponse, error)
 }
 
 type snapshotMessage struct {
@@ -46,6 +48,8 @@ const (
 	inputModeNone inputMode = iota
 	inputModeAdd
 	inputModeCancel
+	inputModeProfile
+	inputModePolicy
 )
 
 type transferPoint struct {
@@ -89,11 +93,14 @@ func (model Model) Init() tea.Cmd {
 func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch message := message.(type) {
 	case tea.KeyMsg:
-		if model.mode == inputModeAdd {
-			return model.updateAddInput(message)
+		if model.mode == inputModeAdd || model.mode == inputModeProfile {
+			return model.updateTextInput(message)
 		}
 		if model.mode == inputModeCancel {
 			return model.updateCancelConfirmation(message)
+		}
+		if model.mode == inputModePolicy {
+			return model.updatePolicySelection(message)
 		}
 		switch message.String() {
 		case "q", "ctrl+c", "esc":
@@ -109,6 +116,13 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		case "a":
 			model.mode = inputModeAdd
 			model.input = ""
+			model.clearActionStatus()
+		case "f":
+			model.mode = inputModeProfile
+			model.input = ""
+			model.clearActionStatus()
+		case "t":
+			model.mode = inputModePolicy
 			model.clearActionStatus()
 		case "p":
 			return model.dispatchSelected("pause")
@@ -186,14 +200,23 @@ func (model Model) View() string {
 			)
 		}
 	}
-	if model.mode == inputModeAdd {
-		view.WriteString("\nAdd URL: ")
+	if model.mode == inputModeAdd || model.mode == inputModeProfile {
+		label := "Add URL: "
+		if model.mode == inputModeProfile {
+			label = "Profile name: "
+		}
+		view.WriteString("\n")
+		view.WriteString(label)
 		view.WriteString(model.input)
 		view.WriteString("\nEnter submit  Esc cancel\n")
 		return view.String()
 	}
 	if model.mode == inputModeCancel {
 		_, _ = fmt.Fprintf(&view, "\nCancel %s? y/N\n", model.downloads[model.selected].ID)
+		return view.String()
+	}
+	if model.mode == inputModePolicy {
+		view.WriteString("\nSelect traffic policy: 1 off  2 balanced  3 throughput  4 latency  5 focus  Esc cancel\n")
 		return view.String()
 	}
 	if model.actionErr != nil {
@@ -205,7 +228,7 @@ func (model Model) View() string {
 		view.WriteString(model.notice)
 		view.WriteByte('\n')
 	}
-	view.WriteString("\n↑/k ↓/j select  a add  p pause  r resume  c cancel  1/2/3 priority  q quit\n")
+	view.WriteString("\n↑/k ↓/j select  a add  p pause  r resume  c cancel  1/2/3 priority  t policy  f profile  q quit\n")
 
 	return view.String()
 }
@@ -265,7 +288,7 @@ func statusValue(value string) string {
 	return value
 }
 
-func (model Model) updateAddInput(message tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (model Model) updateTextInput(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch message.String() {
 	case "esc":
 		model.mode = inputModeNone
@@ -275,16 +298,21 @@ func (model Model) updateAddInput(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 			model.input = string(runes[:len(runes)-1])
 		}
 	case "enter":
-		url := strings.TrimSpace(model.input)
-		if url == "" {
-			model.actionErr = fmt.Errorf("URL is required")
+		value := strings.TrimSpace(model.input)
+		if value == "" {
+			model.actionErr = fmt.Errorf("value is required")
 			model.mode = inputModeNone
 			return model, nil
 		}
+		mode := model.mode
 		model.mode = inputModeNone
 		return model, func() tea.Msg {
-			response, err := model.client.Add(model.ctx, url, "")
-			return actionResultMessage{message: "Added " + response.ID, err: err}
+			if mode == inputModeAdd {
+				response, err := model.client.Add(model.ctx, value, "")
+				return actionResultMessage{message: "Added " + response.ID, err: err}
+			}
+			response, err := model.client.Profile(model.ctx, value)
+			return actionResultMessage{message: "Active profile: " + response.Name, err: err}
 		}
 	default:
 		if message.Type == tea.KeyRunes {
@@ -293,6 +321,25 @@ func (model Model) updateAddInput(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return model, nil
+}
+
+func (model Model) updatePolicySelection(message tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if message.Type == tea.KeyEsc {
+		model.mode = inputModeNone
+		return model, nil
+	}
+	policies := map[string]string{
+		"1": "off", "2": "balanced", "3": "throughput", "4": "latency", "5": "focus",
+	}
+	policy, exists := policies[message.String()]
+	if !exists {
+		return model, nil
+	}
+	model.mode = inputModeNone
+	return model, func() tea.Msg {
+		response, err := model.client.Policy(model.ctx, policy)
+		return actionResultMessage{message: "Traffic policy: " + response.Policy, err: err}
+	}
 }
 
 func (model Model) updateCancelConfirmation(message tea.KeyMsg) (tea.Model, tea.Cmd) {

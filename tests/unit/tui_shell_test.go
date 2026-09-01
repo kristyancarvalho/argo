@@ -63,6 +63,16 @@ func (client *tuiStatusClient) Priority(_ context.Context, id, priority string) 
 	return ipc.PriorityResponse{ID: id, Priority: priority}, client.actionErr
 }
 
+func (client *tuiStatusClient) Profile(_ context.Context, name string) (ipc.ProfileResponse, error) {
+	client.actions = append(client.actions, "profile:"+name)
+	return ipc.ProfileResponse{Name: name}, client.actionErr
+}
+
+func (client *tuiStatusClient) Policy(_ context.Context, policy string) (ipc.PolicyResponse, error) {
+	client.actions = append(client.actions, "policy:"+policy)
+	return ipc.PolicyResponse{Policy: policy, Applied: true}, client.actionErr
+}
+
 func TestTUIModelInitializationLoadsDaemonStatus(t *testing.T) {
 	model, err := tui.NewModel(context.Background(), &tuiStatusClient{
 		status: ipc.Status{State: "running"},
@@ -268,6 +278,49 @@ func TestTUIActionShowsDaemonError(t *testing.T) {
 	updated, _ = updated.(tui.Model).Update(command())
 	if !strings.Contains(updated.(tui.Model).View(), "Action failed: daemon rejected action") {
 		t.Fatalf("action error not shown: %q", updated.(tui.Model).View())
+	}
+}
+
+func TestTUIPolicySelection(t *testing.T) {
+	client := &tuiStatusClient{status: ipc.Status{State: "running"}}
+	model := loadTUIModel(t, client)
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	if !strings.Contains(updated.(tui.Model).View(), "Select traffic policy") {
+		t.Fatalf("policy selection not shown: %q", updated.(tui.Model).View())
+	}
+	updated, command := updated.(tui.Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	if command == nil {
+		t.Fatal("policy selection did not dispatch")
+	}
+	updated, _ = updated.(tui.Model).Update(command())
+	if strings.Join(client.actions, ",") != "policy:latency" || !strings.Contains(updated.(tui.Model).View(), "Traffic policy: latency") {
+		t.Fatalf("unexpected policy result: actions=%v view=%q", client.actions, updated.(tui.Model).View())
+	}
+}
+
+func TestTUIProfileSelection(t *testing.T) {
+	client := &tuiStatusClient{status: ipc.Status{State: "running"}}
+	model := loadTUIModel(t, client)
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	updated, _ = updated.(tui.Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("gaming")})
+	updated, command := updated.(tui.Model).Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if command == nil {
+		t.Fatal("profile selection did not dispatch")
+	}
+	updated, _ = updated.(tui.Model).Update(command())
+	if strings.Join(client.actions, ",") != "profile:gaming" || !strings.Contains(updated.(tui.Model).View(), "Active profile: gaming") {
+		t.Fatalf("unexpected profile result: actions=%v view=%q", client.actions, updated.(tui.Model).View())
+	}
+}
+
+func TestTUIPolicyHelperUnavailableDoesNotExit(t *testing.T) {
+	client := &tuiStatusClient{status: ipc.Status{State: "running"}, actionErr: errors.New("privileged helper unavailable")}
+	model := loadTUIModel(t, client)
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	updated, command := updated.(tui.Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	updated, followup := updated.(tui.Model).Update(command())
+	if followup == nil || !strings.Contains(updated.(tui.Model).View(), "Action failed: privileged helper unavailable") {
+		t.Fatalf("helper failure terminated or was hidden: %q", updated.(tui.Model).View())
 	}
 }
 
