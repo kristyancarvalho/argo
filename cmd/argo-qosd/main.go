@@ -10,18 +10,9 @@ import (
 	"syscall"
 
 	"github.com/kristyancarvalho/argo/internal/qos"
+	"github.com/kristyancarvalho/argo/internal/qosbackend"
 	"github.com/kristyancarvalho/argo/internal/qosipc"
 )
-
-type pendingBackend struct{}
-
-func (pendingBackend) Apply(context.Context, qos.DesiredState) error {
-	return nil
-}
-
-func (pendingBackend) Remove(context.Context, string) error {
-	return nil
-}
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -52,7 +43,7 @@ func run(arguments []string) error {
 	if err != nil {
 		return err
 	}
-	controller, err := qos.NewController(pendingBackend{})
+	controller, err := qos.NewController(qosbackend.New())
 	if err != nil {
 		return err
 	}

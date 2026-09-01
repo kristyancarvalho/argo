@@ -19,7 +19,8 @@ func TestConfigurationDefaultsAndReloadStrategy(t *testing.T) {
 		configuration.Download.RateLimit != "0" ||
 		configuration.Network.PauseOnMetered ||
 		configuration.Network.ResumeAfterMetered ||
-		configuration.QoS.Policy != "off" {
+		configuration.QoS.Policy != "off" ||
+		configuration.QoS.LinkRate != "0" {
 		t.Fatalf("unexpected configuration defaults: %+v", configuration)
 	}
 	if configuration.ReloadStrategy() != config.ReloadOnRestart {
@@ -41,6 +42,7 @@ resume_after_metered = true
 
 [qos]
 policy = "latency"
+link_rate = "100M"
 `)
 	if err := os.WriteFile(path, content, 0o600); err != nil {
 		t.Fatal(err)
@@ -54,7 +56,8 @@ policy = "latency"
 		configuration.Download.MaxChunksPerDownload != 8 ||
 		!configuration.Network.PauseOnMetered ||
 		!configuration.Network.ResumeAfterMetered ||
-		configuration.QoS.Policy != "latency" {
+		configuration.QoS.Policy != "latency" ||
+		configuration.QoS.LinkRate != "100M" {
 		t.Fatalf("unexpected loaded configuration: %+v", configuration)
 	}
 }
@@ -70,6 +73,7 @@ func TestLoadInvalidConfiguration(t *testing.T) {
 		{"chunks", "[download]\nmax_chunks_per_download = -1\n"},
 		{"resume", "[network]\nresume_after_metered = true\n"},
 		{"qos", "[qos]\npolicy = \"maximum\"\n"},
+		{"qos link rate", "[qos]\nlink_rate = \"fast\"\n"},
 		{"unknown", "[download]\nunknown = true\n"},
 	}
 	for _, test := range tests {

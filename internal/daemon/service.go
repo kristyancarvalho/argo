@@ -17,6 +17,7 @@ import (
 	"github.com/kristyancarvalho/argo/internal/ipc"
 	"github.com/kristyancarvalho/argo/internal/model"
 	"github.com/kristyancarvalho/argo/internal/network"
+	"github.com/kristyancarvalho/argo/internal/qos"
 	"github.com/kristyancarvalho/argo/internal/scheduler"
 )
 
@@ -55,6 +56,10 @@ type ServiceOptions struct {
 	ResumeAfterMetered         bool
 	DefaultPriority            model.Priority
 	Profiles                   map[string]Profile
+	TrafficPolicy              qos.Policy
+	TrafficLinkRate            uint64
+	TrafficCgroupID            uint64
+	TrafficBackend             qos.Backend
 }
 
 type Profile struct {
@@ -108,6 +113,10 @@ type Service struct {
 	activeProfile      string
 	profileStore       ProfileStore
 	rateController     DownloadRateController
+	trafficController  *qos.Controller
+	trafficPolicy      qos.Policy
+	trafficLinkRate    uint64
+	trafficCgroupID    uint64
 }
 
 func NewService(parent context.Context, store Store, engine DownloadEngine) (*Service, error) {
@@ -129,6 +138,12 @@ func NewServiceWithOptions(
 	if options.DefaultPriority == "" {
 		options.DefaultPriority = model.PriorityNormal
 	}
+	if options.TrafficPolicy == "" {
+		options.TrafficPolicy = qos.PolicyOff
+	}
+	if err := options.TrafficPolicy.Validate(); err != nil {
+		return nil, err
+	}
 	if _, err := model.ParsePriority(string(options.DefaultPriority)); err != nil {
 		return nil, err
 	}
@@ -145,6 +160,12 @@ func NewServiceWithOptions(
 		}
 		if profile.ResumeAfterMetered && !profile.PauseOnMetered {
 			return nil, fmt.Errorf("invalid profile %q: resume after metered requires pause on metered", name)
+		}
+		if profile.Policy == "" {
+			profile.Policy = string(qos.PolicyOff)
+		}
+		if _, err := qos.ParsePolicy(profile.Policy); err != nil {
+			return nil, fmt.Errorf("invalid profile %q: %w", name, err)
 		}
 		profiles[name] = profile
 	}
@@ -173,6 +194,7 @@ func NewServiceWithOptions(
 		options.DefaultPriority = profile.DefaultPriority
 		options.PauseOnMetered = profile.PauseOnMetered
 		options.ResumeAfterMetered = profile.ResumeAfterMetered
+		options.TrafficPolicy = qos.Policy(profile.Policy)
 	}
 	if len(profiles) > 0 && (!supportsProfiles || !controlsRate) {
 		return nil, fmt.Errorf("service dependencies cannot apply profiles")
@@ -192,6 +214,14 @@ func NewServiceWithOptions(
 	}
 
 	ctx, cancel := context.WithCancel(parent)
+	var trafficController *qos.Controller
+	if options.TrafficBackend != nil {
+		trafficController, err = qos.NewController(options.TrafficBackend)
+		if err != nil {
+			cancel()
+			return nil, err
+		}
+	}
 	service := &Service{
 		store:              store,
 		engine:             engine,
@@ -214,6 +244,10 @@ func NewServiceWithOptions(
 		activeProfile:      activeProfile,
 		profileStore:       profileStore,
 		rateController:     rateController,
+		trafficController:  trafficController,
+		trafficPolicy:      options.TrafficPolicy,
+		trafficLinkRate:    options.TrafficLinkRate,
+		trafficCgroupID:    options.TrafficCgroupID,
 	}
 	service.waitGroup.Add(1)
 	go service.runScheduler()
@@ -245,6 +279,8 @@ func (service *Service) Handle(ctx context.Context, request ipc.Request) (any, e
 		return service.show(ctx, request.Payload)
 	case ipc.OperationProfile:
 		return service.setProfile(ctx, request.Payload)
+	case ipc.OperationPolicy:
+		return service.setTrafficPolicy(ctx, request.Payload)
 	default:
 		return nil, ipc.UnsupportedOperationError{Operation: request.Operation}
 	}
@@ -306,6 +342,7 @@ func (service *Service) add(ctx context.Context, payload json.RawMessage) (ipc.A
 		)
 		return ipc.AddResponse{}, errors.Join(err, statusErr)
 	}
+	_ = service.reconcileTrafficPolicy(context.WithoutCancel(ctx))
 
 	return ipc.AddResponse{
 		ID:          download.ID.String(),
@@ -347,6 +384,7 @@ func (service *Service) pause(ctx context.Context, payload json.RawMessage) (ipc
 
 	service.cancelActive(identifier)
 	service.forgetMeteredPause(identifier)
+	_ = service.reconcileTrafficPolicy(context.WithoutCancel(ctx))
 
 	return actionResponse(identifier, model.StatusPaused), nil
 }
@@ -379,6 +417,7 @@ func (service *Service) resume(ctx context.Context, payload json.RawMessage) (ip
 		return ipc.DownloadActionResponse{}, err
 	}
 	service.forgetMeteredPause(identifier)
+	_ = service.reconcileTrafficPolicy(context.WithoutCancel(ctx))
 
 	return actionResponse(identifier, status), nil
 }
@@ -471,6 +510,7 @@ func (service *Service) cancelDownload(
 
 	service.cancelActive(identifier)
 	service.forgetMeteredPause(identifier)
+	_ = service.reconcileTrafficPolicy(context.WithoutCancel(ctx))
 
 	return actionResponse(identifier, model.StatusCanceled), nil
 }
@@ -596,10 +636,12 @@ func (service *Service) setProfile(ctx context.Context, payload json.RawMessage)
 	service.defaultPriority = profile.DefaultPriority
 	service.pauseOnMetered = profile.PauseOnMetered
 	service.resumeAfterMetered = profile.ResumeAfterMetered
+	service.trafficPolicy = qos.Policy(profile.Policy)
 	service.profileMutex.Unlock()
 	if err := service.updateSchedulerLimit(ctx, profile.MaximumConcurrentDownloads); err != nil {
 		return ipc.ProfileResponse{}, err
 	}
+	_ = service.reconcileTrafficPolicy(ctx)
 
 	return profileResponse(profile), nil
 }
@@ -662,6 +704,7 @@ func (service *Service) process(
 		service.activeMutex.Lock()
 		delete(service.activeCancels, identifier)
 		service.activeMutex.Unlock()
+		_ = service.reconcileTrafficPolicy(service.ctx)
 		select {
 		case service.completed <- identifier:
 		case <-service.ctx.Done():

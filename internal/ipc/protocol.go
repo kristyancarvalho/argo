@@ -20,6 +20,7 @@ const (
 	OperationList     Operation = "list"
 	OperationShow     Operation = "show"
 	OperationProfile  Operation = "profile"
+	OperationPolicy   Operation = "policy"
 )
 
 type Request struct {
@@ -89,6 +90,15 @@ type ProfileResponse struct {
 	PauseOnMetered         bool   `json:"pause_on_metered"`
 	ResumeAfterMetered     bool   `json:"resume_after_metered"`
 	Policy                 string `json:"policy"`
+}
+
+type PolicyRequest struct {
+	Policy string `json:"policy"`
+}
+
+type PolicyResponse struct {
+	Policy  string `json:"policy"`
+	Applied bool   `json:"applied"`
 }
 
 type Download struct {

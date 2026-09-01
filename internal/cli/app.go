@@ -19,6 +19,7 @@ type Client interface {
 	Priority(context.Context, string, string) (ipc.PriorityResponse, error)
 	Status(context.Context) (ipc.Status, error)
 	Profile(context.Context, string) (ipc.ProfileResponse, error)
+	Policy(context.Context, string) (ipc.PolicyResponse, error)
 }
 
 func Run(ctx context.Context, client Client, output io.Writer, arguments []string) error {
@@ -49,9 +50,28 @@ func Run(ctx context.Context, client Client, output io.Writer, arguments []strin
 		return runStatus(ctx, client, output, operands)
 	case "profile":
 		return runProfile(ctx, client, output, operands)
+	case "policy":
+		return runPolicy(ctx, client, output, operands)
 	default:
 		return UsageError{Message: fmt.Sprintf("unknown command %q", command)}
 	}
+}
+
+func runPolicy(ctx context.Context, client Client, output io.Writer, arguments []string) error {
+	if len(arguments) != 1 {
+		return UsageError{Message: "argo policy <off|balanced|throughput|focus>"}
+	}
+	policy, err := client.Policy(ctx, arguments[0])
+	if err != nil {
+		return err
+	}
+	state := "inactive"
+	if policy.Applied {
+		state = "active"
+	}
+	_, err = fmt.Fprintf(output, "Traffic policy: %s (%s)\n", policy.Policy, state)
+
+	return err
 }
 
 func runProfile(ctx context.Context, client Client, output io.Writer, arguments []string) error {
