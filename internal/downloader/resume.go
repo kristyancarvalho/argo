@@ -14,6 +14,7 @@ func (engine *Engine) prepareResumeState(
 	download *model.Download,
 	metadata RemoteMetadata,
 ) error {
+	_, strict := engine.strict.LoadAndDelete(download.ID)
 	chunks, err := engine.store.DownloadChunks(ctx, download.ID)
 	if err != nil {
 		return err
@@ -28,13 +29,51 @@ func (engine *Engine) prepareResumeState(
 	if valid {
 		return nil
 	}
+	if strict {
+		return ResumeUnavailableError{ID: download.ID.String(), Reason: "remote validators changed"}
+	}
 	if err := engine.store.ResetDownloadProgress(ctx, download.ID, engine.now()); err != nil {
 		return err
 	}
-	if err := os.Remove(partialPath(*download)); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := os.Remove(engine.partialPath(download.ID)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("remove stale partial file: %w", err)
 	}
 	download.DownloadedBytes = 0
+
+	return nil
+}
+
+func (engine *Engine) ValidateCanceledResume(ctx context.Context, download model.Download) error {
+	if download.Status != model.StatusCanceled {
+		return ResumeUnavailableError{ID: download.ID.String(), Reason: "download is not canceled"}
+	}
+	if download.DownloadedBytes <= 0 {
+		return ResumeUnavailableError{ID: download.ID.String(), Reason: "no reusable partial data exists"}
+	}
+	if err := engine.preparePartial(download); err != nil {
+		return ResumeUnavailableError{ID: download.ID.String(), Reason: err.Error()}
+	}
+	info, err := os.Stat(engine.partialPath(download.ID))
+	if errors.Is(err, os.ErrNotExist) {
+		return ResumeUnavailableError{ID: download.ID.String(), Reason: "partial data is missing"}
+	}
+	if err != nil {
+		return ResumeUnavailableError{ID: download.ID.String(), Reason: err.Error()}
+	}
+	if !info.Mode().IsRegular() || info.Size() < download.DownloadedBytes {
+		return ResumeUnavailableError{ID: download.ID.String(), Reason: "partial data is incomplete or invalid"}
+	}
+	metadata, err := NewInspector(engine.httpClient).Inspect(ctx, download.URL)
+	if err != nil {
+		return ResumeUnavailableError{ID: download.ID.String(), Reason: err.Error()}
+	}
+	if !metadata.RangeSupported {
+		return ResumeUnavailableError{ID: download.ID.String(), Reason: "remote server no longer supports byte ranges"}
+	}
+	if !validatorsMatch(download, metadata) {
+		return ResumeUnavailableError{ID: download.ID.String(), Reason: "remote validators changed"}
+	}
+	engine.strict.Store(download.ID, struct{}{})
 
 	return nil
 }

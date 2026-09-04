@@ -15,6 +15,15 @@ type DestinationExistsError struct {
 	Path string
 }
 
+type ResumeUnavailableError struct {
+	ID     string
+	Reason string
+}
+
+func (err ResumeUnavailableError) Error() string {
+	return fmt.Sprintf("download %s cannot resume: %s; use retry to start a new transfer", err.ID, err.Reason)
+}
+
 type InvalidChunkPlanError struct {
 	Reason string
 }

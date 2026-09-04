@@ -35,7 +35,7 @@ func (engine *Engine) downloadParallel(
 	chunks []Chunk,
 	resolving bool,
 ) error {
-	partial, finalPath, originalSize, err := prepareParallelFile(download, metadata.TotalSize)
+	partial, finalPath, originalSize, err := engine.prepareParallelFile(download, metadata.TotalSize)
 	if err != nil {
 		return engine.fail(ctx, download.ID, err)
 	}
@@ -121,8 +121,15 @@ func (engine *Engine) downloadParallel(
 		return engine.fail(ctx, download.ID, fmt.Errorf("close parallel partial file: %w", err))
 	}
 	partialOpen = false
-	if err := os.Rename(partialPath(download), finalPath); err != nil {
-		return engine.fail(ctx, download.ID, fmt.Errorf("finalize parallel download: %w", err))
+	finalPath, err = engine.finalize(download, finalPath)
+	if err != nil {
+		return engine.fail(ctx, download.ID, err)
+	}
+	filename := filepath.Base(finalPath)
+	if filename != download.Filename {
+		if err := engine.store.UpdateDownloadFilename(ctx, download.ID, filename, engine.now()); err != nil {
+			return engine.fail(ctx, download.ID, err)
+		}
 	}
 	if err := engine.store.UpdateDownloadStatus(
 		ctx,
@@ -299,17 +306,15 @@ func adjustChunkStatesForSize(states []model.DownloadChunk, fileSize int64) {
 	}
 }
 
-func prepareParallelFile(download model.Download, totalSize int64) (*os.File, string, int64, error) {
+func (engine *Engine) prepareParallelFile(download model.Download, totalSize int64) (*os.File, string, int64, error) {
 	if err := os.MkdirAll(download.Destination, 0o755); err != nil {
 		return nil, "", 0, fmt.Errorf("create destination directory: %w", err)
 	}
 	finalPath := filepath.Join(download.Destination, download.Filename)
-	if _, err := os.Stat(finalPath); err == nil {
-		return nil, "", 0, DestinationExistsError{Path: finalPath}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, "", 0, fmt.Errorf("inspect destination file: %w", err)
+	if err := engine.preparePartial(download); err != nil {
+		return nil, "", 0, err
 	}
-	partial, err := os.OpenFile(partialPath(download), os.O_CREATE|os.O_RDWR, 0o600)
+	partial, err := os.OpenFile(engine.partialPath(download.ID), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, "", 0, fmt.Errorf("create parallel partial file: %w", err)
 	}

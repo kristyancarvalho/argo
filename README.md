@@ -19,6 +19,7 @@ Early development.
 
 ```toml
 [download]
+directory = "~/Downloads"
 default_priority = "normal"
 max_concurrent_downloads = 3
 max_chunks_per_download = 4
@@ -49,6 +50,7 @@ max_rate = "80M"
 ```
 
 Configuration is loaded at daemon startup. Restart `argod` after editing the file.
+Completed downloads default to `$HOME/Downloads`; `download.directory` accepts an absolute path or a path beginning with `~/`. Argo keeps resumable partial data separately under `$XDG_STATE_HOME/argo/parts`, falling back to `$HOME/.local/state/argo/parts`, and never derives either location from the CLI working directory.
 Select a configured profile at runtime with `argo profile <name>`. Select system traffic shaping with `argo policy <off|balanced|throughput|latency|focus>`. Download rates use bytes per second, while `qos.link_rate`, `min_rate`, and `max_rate` use bits per second. `K`, `M`, and `G` are decimal suffixes. Latency policy profiles can override the acceptable latency increase and rate bounds. Set `qos.probe_target` to a safe `host:port` endpoint to collect TCP-connect latency; an empty target produces missing telemetry and the bounded fallback behavior. The active profile is persisted across daemon restarts.
 
 Download priority only orders queued transfers managed by Argo. It does not shape packets or change an already active transfer. Traffic policies divide guaranteed link capacity between Argo and the default class: `focus` reserves 20% for Argo to protect system responsiveness, `balanced` reserves 50%, and `throughput` reserves 80%. Unused capacity can be borrowed by either class. `latency` adjusts Argo's limit from live latency measurements.
@@ -58,8 +60,13 @@ QoS is applied only while downloads are active and requires a nonzero `qos.link_
 To verify a live setup, check `systemctl --user status argod.service`, `systemctl status argo-qosd@$(id -un).service`, and `argo status`. Kernel state is visible with `sudo tc -s class show dev <interface>` and `sudo nft list table inet argo` while an Argo download is active.
 
 Run `argo tui` for the optional terminal interface. It connects to the existing user daemon, and exiting the interface does not stop active downloads.
+The TUI keeps daemon and network state separate from the scrollable download list, adapts to narrow terminals, shows full selected details, and provides confirmed cancel, remove, and clear actions. Press `?` for its keyboard reference.
 
 Run `argo --help` to list commands and explain the difference between download priority and system traffic policies. Argo uses colors when writing to a terminal; set `NO_COLOR=1` to disable them.
+
+`argo resume <id>` continues valid partial state with the same transfer identity. `argo retry <id>` creates a new transfer from completed, failed, or canceled history, preserving the original record. Repeated URLs always create new IDs, and existing destination names receive a deterministic numeric suffix instead of being overwritten.
+
+`argo watch` redraws one live region when attached to a terminal and exits after one plain snapshot when piped or redirected. Throughput remains responsive while ETA uses smoothed samples and a three-second display debounce.
 
 ## systemd
 

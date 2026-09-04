@@ -91,7 +91,14 @@ func TestQoSHelperRejectsUnauthorizedPeerBeforePayload(t *testing.T) {
 		staticQoSAuthorizer{err: errors.New("denied")},
 	)
 	defer stopQoSServer(t, server, cancel, finished)
-	response := sendQoSRequest(t, server.SocketPath(), "{malformed}\n")
+	connection, err := net.Dial("unix", server.SocketPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = connection.Close()
+	}()
+	response := readQoSResponse(t, connection)
 	if response.OK || response.Error == nil || response.Error.Code != "unauthorized" || response.ID != "" {
 		t.Fatalf("unexpected unauthorized response: %+v", response)
 	}
@@ -158,6 +165,11 @@ func sendQoSRequest(t *testing.T, socketPath, message string) qosipc.Response {
 	if _, err := connection.Write([]byte(message)); err != nil {
 		t.Fatal(err)
 	}
+	return readQoSResponse(t, connection)
+}
+
+func readQoSResponse(t *testing.T, connection net.Conn) qosipc.Response {
+	t.Helper()
 	encoded, err := bufio.NewReader(connection).ReadBytes('\n')
 	if err != nil {
 		t.Fatal(err)

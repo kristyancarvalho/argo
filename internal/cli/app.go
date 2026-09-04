@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"text/tabwriter"
@@ -16,6 +17,9 @@ type Client interface {
 	Pause(context.Context, string) (ipc.DownloadActionResponse, error)
 	Resume(context.Context, string) (ipc.DownloadActionResponse, error)
 	Cancel(context.Context, string) (ipc.DownloadActionResponse, error)
+	Remove(context.Context, string) (ipc.DownloadActionResponse, error)
+	Clear(context.Context) (ipc.ClearResponse, error)
+	Retry(context.Context, string) (ipc.AddResponse, error)
 	Priority(context.Context, string, string) (ipc.PriorityResponse, error)
 	Status(context.Context) (ipc.Status, error)
 	Profile(context.Context, string) (ipc.ProfileResponse, error)
@@ -51,10 +55,16 @@ func RunWithOptions(ctx context.Context, client Client, output io.Writer, argume
 		return runAction(ctx, client.Resume, output, command, operands)
 	case "cancel":
 		return runAction(ctx, client.Cancel, output, command, operands)
+	case "remove":
+		return runAction(ctx, client.Remove, output, command, operands)
+	case "clear":
+		return runClear(ctx, client, output, operands)
+	case "retry":
+		return runRetry(ctx, client, output, operands)
 	case "priority":
 		return runPriority(ctx, client, output, operands)
 	case "watch":
-		return runWatch(ctx, client, output, operands)
+		return runWatch(ctx, client, output, operands, options.Interactive)
 	case "status":
 		return runStatus(ctx, client, output, operands)
 	case "profile":
@@ -82,6 +92,9 @@ Commands:
   pause <id>                        Pause a download
   resume <id>                       Resume a download
   cancel <id>                       Cancel a download
+  remove <id>                       Remove a historical download
+  clear                             Clear completed, failed, and canceled history
+  retry <id>                        Start a new transfer from historical source
   priority <id> <low|normal|high>   Order queued Argo downloads
   watch                             Stream download progress
   status                            Show daemon, network, and QoS state
@@ -100,6 +113,9 @@ Traffic policies:
 Priorities only order queued downloads inside Argo. Policies control how Argo
 competes with other applications and require an active download, a configured
 link rate, a connected interface, and the privileged argo-qosd helper.
+
+Resume preserves a transfer ID and requires valid partial data. Retry creates a
+new transfer ID from completed, failed, or canceled history.
 `)
 
 	return err
@@ -155,6 +171,32 @@ func runAdd(ctx context.Context, client Client, output io.Writer, arguments []st
 		return UsageError{Message: "argo add <url>"}
 	}
 	response, err := client.Add(ctx, arguments[0], "")
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(output, "Added %s %s (%s)\n", response.ID, response.Filename, response.Status)
+
+	return err
+}
+
+func runClear(ctx context.Context, client Client, output io.Writer, arguments []string) error {
+	if len(arguments) != 0 {
+		return UsageError{Message: "argo clear"}
+	}
+	response, err := client.Clear(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(output, "Removed %d historical downloads\n", response.Removed)
+
+	return err
+}
+
+func runRetry(ctx context.Context, client Client, output io.Writer, arguments []string) error {
+	if len(arguments) != 1 {
+		return UsageError{Message: "argo retry <id>"}
+	}
+	response, err := client.Retry(ctx, arguments[0])
 	if err != nil {
 		return err
 	}
@@ -234,14 +276,27 @@ func runAction(
 	return err
 }
 
-func runWatch(ctx context.Context, client Client, output io.Writer, arguments []string) error {
+func runWatch(ctx context.Context, client Client, output io.Writer, arguments []string, interactive bool) error {
 	if len(arguments) != 0 {
 		return UsageError{Message: "argo watch"}
 	}
 
-	return NewWatcher(client).Stream(ctx, func(snapshot WatchSnapshot) error {
+	watcher := NewWatcher(client)
+	if !interactive {
+		snapshot, err := watcher.Snapshot(ctx)
+		if err != nil {
+			return err
+		}
+
 		return renderWatchSnapshot(output, snapshot)
-	})
+	}
+	renderer := newWatchRegionRenderer(output)
+	err := watcher.Stream(ctx, renderer.Render)
+	if errors.Is(err, context.Canceled) {
+		return nil
+	}
+
+	return err
 }
 
 func runPriority(ctx context.Context, client Client, output io.Writer, arguments []string) error {

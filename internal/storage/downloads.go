@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/kristyancarvalho/argo/internal/model"
@@ -100,6 +101,64 @@ func (store *Store) Downloads(ctx context.Context) ([]model.Download, error) {
 	return downloads, nil
 }
 
+func (store *Store) DeleteDownload(ctx context.Context, id model.DownloadID) error {
+	result, err := store.database.ExecContext(ctx, "DELETE FROM downloads WHERE id = ?", id.String())
+	if err != nil {
+		return fmt.Errorf("delete download %s: %w", id, err)
+	}
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read delete result for download %s: %w", id, err)
+	}
+	if deleted != 1 {
+		return fmt.Errorf("%w: %s", ErrDownloadNotFound, id)
+	}
+
+	return nil
+}
+
+func (store *Store) ClearDownloadHistory(ctx context.Context) ([]model.Download, error) {
+	transaction, err := store.database.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin history clear: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = transaction.Rollback()
+		}
+	}()
+	rows, err := transaction.QueryContext(ctx, "SELECT "+downloadColumns+" FROM downloads WHERE status IN ('completed', 'failed', 'canceled') ORDER BY created_at, id")
+	if err != nil {
+		return nil, fmt.Errorf("list historical downloads: %w", err)
+	}
+	downloads := make([]model.Download, 0)
+	for rows.Next() {
+		download, err := scanDownload(rows)
+		if err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("scan historical download: %w", err)
+		}
+		downloads = append(downloads, download)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, fmt.Errorf("iterate historical downloads: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close historical download rows: %w", err)
+	}
+	if _, err := transaction.ExecContext(ctx, "DELETE FROM downloads WHERE status IN ('completed', 'failed', 'canceled')"); err != nil {
+		return nil, fmt.Errorf("clear download history: %w", err)
+	}
+	if err := transaction.Commit(); err != nil {
+		return nil, fmt.Errorf("commit history clear: %w", err)
+	}
+	committed = true
+
+	return downloads, nil
+}
+
 func (store *Store) RecoverActiveDownloads(ctx context.Context, updatedAt time.Time) error {
 	_, err := store.database.ExecContext(ctx, `UPDATE downloads SET
         status = 'queued',
@@ -179,6 +238,31 @@ func (store *Store) UpdateDownloadPriority(
 	updated, err := result.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("read priority update result for download %s: %w", id, err)
+	}
+	if updated != 1 {
+		return fmt.Errorf("%w: %s", ErrDownloadNotFound, id)
+	}
+
+	return nil
+}
+
+func (store *Store) UpdateDownloadFilename(
+	ctx context.Context,
+	id model.DownloadID,
+	filename string,
+	updatedAt time.Time,
+) error {
+	if filename == "" || filename != filepath.Base(filename) || filename == "." || filename == ".." {
+		return fmt.Errorf("invalid download filename %q", filename)
+	}
+	result, err := store.database.ExecContext(ctx, `UPDATE downloads
+        SET filename = ?, updated_at = ? WHERE id = ?`, filename, formatTime(updatedAt), id.String())
+	if err != nil {
+		return fmt.Errorf("update filename for download %s: %w", id, err)
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read filename update result for download %s: %w", id, err)
 	}
 	if updated != 1 {
 		return fmt.Errorf("%w: %s", ErrDownloadNotFound, id)

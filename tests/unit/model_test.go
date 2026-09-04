@@ -28,6 +28,7 @@ func TestValidDownloadTransitions(t *testing.T) {
 		{model.StatusPaused, model.StatusCanceled},
 		{model.StatusFailed, model.StatusQueued},
 		{model.StatusFailed, model.StatusCanceled},
+		{model.StatusCanceled, model.StatusQueued},
 	}
 
 	for _, test := range valid {
@@ -66,6 +67,7 @@ func TestInvalidDownloadTransitions(t *testing.T) {
 		{model.StatusPaused, model.StatusCanceled}:       {},
 		{model.StatusFailed, model.StatusQueued}:         {},
 		{model.StatusFailed, model.StatusCanceled}:       {},
+		{model.StatusCanceled, model.StatusQueued}:       {},
 	}
 
 	for _, from := range statuses {

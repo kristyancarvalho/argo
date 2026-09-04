@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"time"
 )
 
@@ -34,14 +33,6 @@ func (client *Client) Status(ctx context.Context) (Status, error) {
 }
 
 func (client *Client) Add(ctx context.Context, rawURL, destination string) (AddResponse, error) {
-	if destination == "" {
-		workingDirectory, err := os.Getwd()
-		if err != nil {
-			return AddResponse{}, fmt.Errorf("determine download destination: %w", err)
-		}
-		destination = workingDirectory
-	}
-
 	var response AddResponse
 	if err := client.Call(ctx, OperationAdd, AddRequest{
 		URL:         rawURL,
@@ -63,6 +54,28 @@ func (client *Client) Resume(ctx context.Context, id string) (DownloadActionResp
 
 func (client *Client) Cancel(ctx context.Context, id string) (DownloadActionResponse, error) {
 	return client.downloadAction(ctx, OperationCancel, id)
+}
+
+func (client *Client) Remove(ctx context.Context, id string) (DownloadActionResponse, error) {
+	return client.downloadAction(ctx, OperationRemove, id)
+}
+
+func (client *Client) Clear(ctx context.Context) (ClearResponse, error) {
+	var response ClearResponse
+	if err := client.Call(ctx, OperationClear, nil, &response); err != nil {
+		return ClearResponse{}, err
+	}
+
+	return response, nil
+}
+
+func (client *Client) Retry(ctx context.Context, id string) (AddResponse, error) {
+	var response AddResponse
+	if err := client.Call(ctx, OperationRetry, DownloadActionRequest{ID: id}, &response); err != nil {
+		return AddResponse{}, err
+	}
+
+	return response, nil
 }
 
 func (client *Client) Priority(ctx context.Context, id, priority string) (PriorityResponse, error) {

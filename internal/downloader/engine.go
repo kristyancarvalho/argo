@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -23,6 +24,7 @@ type Store interface {
 	ReplaceDownloadChunks(context.Context, model.DownloadID, []model.DownloadChunk, time.Time) error
 	ResetDownloadProgress(context.Context, model.DownloadID, time.Time) error
 	UpdateChunkProgress(context.Context, model.DownloadID, int, int64, time.Time) error
+	UpdateDownloadFilename(context.Context, model.DownloadID, string, time.Time) error
 	UpdateDownloadProgress(context.Context, model.DownloadID, int64, time.Time) error
 	UpdateRemoteMetadata(context.Context, model.DownloadID, int64, bool, string, string, time.Time) error
 	UpdateDownloadStatus(context.Context, model.DownloadID, model.Status, time.Time, string) error
@@ -36,6 +38,8 @@ type Engine struct {
 	planner    ChunkPlanner
 	chunkCount int
 	observer   func(model.DownloadID, ChunkProgress)
+	parts      string
+	strict     sync.Map
 }
 
 type Options struct {
@@ -44,6 +48,7 @@ type Options struct {
 	MaximumChunks    int
 	MinimumChunkSize int64
 	ChunkProgress    func(model.DownloadID, ChunkProgress)
+	PartsDirectory   string
 }
 
 func New(store Store) *Engine {
@@ -80,6 +85,16 @@ func NewWithOptions(store Store, options Options) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
+	parts := options.PartsDirectory
+	if parts == "" {
+		parts, err = DefaultPartsDirectory()
+		if err != nil {
+			return nil, err
+		}
+	}
+	if !filepath.IsAbs(parts) {
+		return nil, fmt.Errorf("partial directory must be absolute")
+	}
 
 	engine := &Engine{
 		httpClient: options.HTTPClient,
@@ -88,6 +103,7 @@ func NewWithOptions(store Store, options Options) (*Engine, error) {
 		planner:    planner,
 		chunkCount: options.MaximumChunks,
 		observer:   options.ChunkProgress,
+		parts:      filepath.Clean(parts),
 	}
 	engine.rateLimit.Store(options.BytesPerSecond)
 
@@ -189,7 +205,7 @@ func (engine *Engine) Download(ctx context.Context, download model.Download) err
 		}
 	}
 
-	partial, err := openPartial(partialPath(download), offset)
+	partial, err := openPartial(engine.partialPath(download.ID), offset)
 	if err != nil {
 		return engine.fail(ctx, download.ID, err)
 	}
@@ -256,8 +272,15 @@ func (engine *Engine) Download(ctx context.Context, download model.Download) err
 		return engine.fail(ctx, download.ID, fmt.Errorf("close partial file: %w", err))
 	}
 	partialOpen = false
-	if err := os.Rename(partialPath(download), finalPath); err != nil {
-		return engine.fail(ctx, download.ID, fmt.Errorf("finalize download: %w", err))
+	finalPath, err = engine.finalize(download, finalPath)
+	if err != nil {
+		return engine.fail(ctx, download.ID, err)
+	}
+	filename := filepath.Base(finalPath)
+	if filename != download.Filename {
+		if err := engine.store.UpdateDownloadFilename(ctx, download.ID, filename, engine.now()); err != nil {
+			return engine.fail(ctx, download.ID, err)
+		}
 	}
 	if err := engine.store.UpdateDownloadStatus(
 		ctx,
@@ -277,13 +300,11 @@ func (engine *Engine) preparePaths(download model.Download) (int64, string, erro
 		return 0, "", fmt.Errorf("create destination directory: %w", err)
 	}
 	finalPath := filepath.Join(download.Destination, download.Filename)
-	if _, err := os.Stat(finalPath); err == nil {
-		return 0, "", DestinationExistsError{Path: finalPath}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return 0, "", fmt.Errorf("inspect destination file: %w", err)
-	}
 
-	partial := partialPath(download)
+	if err := engine.preparePartial(download); err != nil {
+		return 0, "", err
+	}
+	partial := engine.partialPath(download.ID)
 	info, err := os.Stat(partial)
 	if errors.Is(err, os.ErrNotExist) {
 		return 0, finalPath, nil
@@ -434,8 +455,4 @@ func (engine *Engine) fail(ctx context.Context, id model.DownloadID, downloadErr
 	}
 
 	return downloadError
-}
-
-func partialPath(download model.Download) string {
-	return filepath.Join(download.Destination, ".argo-"+download.ID.String()+".part")
 }

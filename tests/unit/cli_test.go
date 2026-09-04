@@ -66,6 +66,21 @@ func (client *cliClient) Cancel(_ context.Context, id string) (ipc.DownloadActio
 	return ipc.DownloadActionResponse{ID: id, Status: "canceled"}, nil
 }
 
+func (client *cliClient) Remove(_ context.Context, id string) (ipc.DownloadActionResponse, error) {
+	client.called = "remove:" + id
+	return ipc.DownloadActionResponse{ID: id, Status: "removed"}, nil
+}
+
+func (client *cliClient) Clear(context.Context) (ipc.ClearResponse, error) {
+	client.called = "clear"
+	return ipc.ClearResponse{Removed: 2}, nil
+}
+
+func (client *cliClient) Retry(_ context.Context, id string) (ipc.AddResponse, error) {
+	client.called = "retry:" + id
+	return ipc.AddResponse{ID: "retry-id", Filename: "file.bin", Status: "queued"}, nil
+}
+
 func (client *cliClient) Priority(_ context.Context, id, priority string) (ipc.PriorityResponse, error) {
 	client.called = "priority:" + id + ":" + priority
 	return ipc.PriorityResponse{ID: id, Priority: priority}, nil
@@ -188,6 +203,9 @@ func TestCLICommands(t *testing.T) {
 		{"pause", []string{"pause", "download-id"}, "pause:download-id", "download-id: paused"},
 		{"resume", []string{"resume", "download-id"}, "resume:download-id", "download-id: downloading"},
 		{"cancel", []string{"cancel", "download-id"}, "cancel:download-id", "download-id: canceled"},
+		{"remove", []string{"remove", "download-id"}, "remove:download-id", "download-id: removed"},
+		{"clear", []string{"clear"}, "clear", "Removed 2 historical downloads"},
+		{"retry", []string{"retry", "download-id"}, "retry:download-id", "Added retry-id"},
 		{"priority", []string{"priority", "download-id", "high"}, "priority:download-id:high", "download-id: high"},
 		{"status", []string{"status"}, "status", "Daemon: running"},
 		{"profile", []string{"profile", "gaming"}, "profile:gaming", "Active profile: gaming"},
@@ -223,6 +241,9 @@ func TestCLIRejectsInvalidArguments(t *testing.T) {
 		{"pause"},
 		{"resume"},
 		{"cancel"},
+		{"remove"},
+		{"clear", "extra"},
+		{"retry"},
 		{"priority"},
 		{"priority", "download-id"},
 		{"priority", "download-id", "high", "extra"},
@@ -311,5 +332,54 @@ func TestCLIWatchCompletedDownload(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "completed") || !strings.Contains(output.String(), "total 0 B/s") {
 		t.Fatalf("unexpected watch output %q", output.String())
+	}
+}
+
+type redrawWatchClient struct {
+	*cliClient
+	calls int
+}
+
+func (client *redrawWatchClient) List(context.Context) ([]ipc.Download, error) {
+	client.calls++
+	status := "downloading"
+	bytes := int64(5)
+	if client.calls > 1 {
+		status = "completed"
+		bytes = 10
+	}
+
+	return []ipc.Download{{
+		ID: "download-id", Filename: "file.bin", Status: status, DownloadedBytes: bytes, TotalSize: 10,
+	}}, nil
+}
+
+func TestCLIWatchRedrawsInteractiveRegion(t *testing.T) {
+	client := &redrawWatchClient{cliClient: &cliClient{}}
+	var output bytes.Buffer
+	if err := cli.RunWithOptions(
+		context.Background(), client, &output, []string{"watch"}, cli.Options{Interactive: true},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if client.calls != 2 {
+		t.Fatalf("interactive watch made %d list calls", client.calls)
+	}
+	if !strings.Contains(output.String(), "\x1b[") || !strings.Contains(output.String(), "\x1b[2K") {
+		t.Fatalf("interactive watch did not redraw in place: %q", output.String())
+	}
+}
+
+func TestCLIWatchNonInteractiveEmitsOnePlainSnapshot(t *testing.T) {
+	client := &redrawWatchClient{cliClient: &cliClient{}}
+	var output bytes.Buffer
+	if err := cli.Run(context.Background(), client, &output, []string{"watch"}); err != nil {
+		t.Fatal(err)
+	}
+	if client.calls != 1 {
+		t.Fatalf("non-interactive watch made %d list calls", client.calls)
+	}
+	if strings.Contains(output.String(), "\x1b[") || !strings.Contains(output.String(), "downloading") {
+		t.Fatalf("non-interactive watch output is not a plain snapshot: %q", output.String())
 	}
 }

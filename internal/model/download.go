@@ -83,7 +83,9 @@ var transitions = map[Status]map[Status]struct{}{
 		StatusCanceled: {},
 	},
 	StatusCompleted: {},
-	StatusCanceled:  {},
+	StatusCanceled: {
+		StatusQueued: {},
+	},
 }
 
 func ParseStatus(value string) (Status, error) {
