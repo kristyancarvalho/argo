@@ -10,6 +10,7 @@ import (
 )
 
 func TestDaemonListShowAndCancelCommands(t *testing.T) {
+	isolateDownloadState(t)
 	payload := makePayload(512 * 1024)
 	httpServer, _ := rangeFixtureServer(t, payload)
 	store := openTestStore(t)

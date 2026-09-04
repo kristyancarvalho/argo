@@ -184,6 +184,52 @@ func TestCLIBasicDownloadFlow(t *testing.T) {
 	if string(content) != string(payload) {
 		t.Fatalf("downloaded content %q does not match %q", content, payload)
 	}
+	retryOutput, err := executeCLI(ctx, argoBinary, invocationDirectory, environment, "retry", identifier)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retryFields := strings.Fields(retryOutput)
+	if len(retryFields) < 2 || retryFields[0] != "Added" || retryFields[1] == identifier {
+		t.Fatalf("unexpected retry output %q", retryOutput)
+	}
+	retryID := retryFields[1]
+	waitForCLICompletion(t, ctx, argoBinary, invocationDirectory, environment, retryID)
+	repeatedOutput, err := executeCLI(ctx, argoBinary, invocationDirectory, environment, "add", httpServer.URL+"/cli.bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repeatedFields := strings.Fields(repeatedOutput)
+	if len(repeatedFields) < 2 || repeatedFields[1] == identifier || repeatedFields[1] == retryID {
+		t.Fatalf("repeated URL did not create a new identity: %q", repeatedOutput)
+	}
+	repeatedID := repeatedFields[1]
+	waitForCLICompletion(t, ctx, argoBinary, invocationDirectory, environment, repeatedID)
+	for _, filename := range []string{"cli.bin", "cli (1).bin", "cli (2).bin"} {
+		content, err := os.ReadFile(filepath.Join(destination, filename))
+		if err != nil || string(content) != string(payload) {
+			t.Fatalf("repeated download %q is invalid: %v", filename, err)
+		}
+	}
+	removeOutput, err := executeCLI(ctx, argoBinary, invocationDirectory, environment, "remove", identifier)
+	if err != nil || !strings.Contains(removeOutput, identifier+": removed") {
+		t.Fatalf("unexpected remove result %v: %q", err, removeOutput)
+	}
+	if content, err := os.ReadFile(filepath.Join(destination, "cli.bin")); err != nil || string(content) != string(payload) {
+		t.Fatalf("remove changed completed file: %v", err)
+	}
+	clearOutput, err := executeCLI(ctx, argoBinary, invocationDirectory, environment, "clear")
+	if err != nil || !strings.Contains(clearOutput, "Removed 2 historical downloads") {
+		t.Fatalf("unexpected clear result %v: %q", err, clearOutput)
+	}
+	clearedList, err := executeCLI(ctx, argoBinary, invocationDirectory, environment, "list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, removedID := range []string{identifier, retryID, repeatedID} {
+		if strings.Contains(clearedList, removedID) {
+			t.Fatalf("cleared list still contains %s: %q", removedID, clearedList)
+		}
+	}
 	entries, err := os.ReadDir(invocationDirectory)
 	if err != nil {
 		t.Fatal(err)
@@ -197,6 +243,31 @@ func TestCLIBasicDownloadFlow(t *testing.T) {
 	}
 	if err := daemonCommand.Wait(); err != nil {
 		t.Fatalf("daemon shutdown: %v: %s", err, daemonError.String())
+	}
+}
+
+func waitForCLICompletion(
+	t *testing.T,
+	ctx context.Context,
+	binary string,
+	directory string,
+	environment []string,
+	identifier string,
+) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		output, err := executeCLI(ctx, binary, directory, environment, "show", identifier)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(output, "Status: completed") {
+			return
+		}
+		if strings.Contains(output, "Status: failed") || time.Now().After(deadline) {
+			t.Fatalf("download %s did not complete: %s", identifier, output)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
