@@ -159,7 +159,7 @@ func (engine *Engine) Download(ctx context.Context, download model.Download) err
 	); err != nil {
 		return engine.fail(ctx, download.ID, err)
 	}
-	if metadata.RangeSupported && metadata.TotalSize > 0 {
+	if metadata.RangeSupported && metadata.TotalSize > 0 && metadata.supportsBoundRequests() {
 		chunks, err := engine.planner.Plan(metadata.TotalSize, engine.chunkCount)
 		if err != nil {
 			return engine.fail(ctx, download.ID, err)
@@ -186,6 +186,7 @@ func (engine *Engine) Download(ctx context.Context, download model.Download) err
 	if offset > 0 {
 		request.Header.Set("Range", fmt.Sprintf("bytes=%d-", offset))
 	}
+	bindRepresentation(request, metadata)
 	response, err := engine.httpClient.Do(request)
 	if err != nil {
 		return engine.fail(ctx, download.ID, fmt.Errorf("perform HTTP request: %w", err))
@@ -193,6 +194,9 @@ func (engine *Engine) Download(ctx context.Context, download model.Download) err
 	defer func() {
 		_ = response.Body.Close()
 	}()
+	if err := validateRepresentation(response, metadata); err != nil {
+		return engine.fail(ctx, download.ID, err)
+	}
 
 	responseOffset, totalSize, err := resolveResponse(response, offset)
 	if err != nil {
