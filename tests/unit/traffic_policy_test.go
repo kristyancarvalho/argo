@@ -20,7 +20,7 @@ func TestTrafficPolicyMapping(t *testing.T) {
 			state, err := qos.MapPolicy(test.policy, qos.PolicyEnvironment{
 				Interface:             "eth0",
 				LinkRateBitsPerSecond: 100_000_000,
-				CgroupID:              42,
+				Cgroup:                qos.CgroupSelector{Path: "argo.service", Level: 1},
 				ActiveDownloads:       2,
 			})
 			if err != nil {
@@ -48,9 +48,9 @@ func TestTrafficPolicyMappingTurnsOffWithoutActiveDownloads(t *testing.T) {
 
 func TestTrafficPolicyMappingRejectsUnavailableInputs(t *testing.T) {
 	tests := []qos.PolicyEnvironment{
-		{Interface: "", LinkRateBitsPerSecond: 100, CgroupID: 1, ActiveDownloads: 1},
-		{Interface: "eth0", LinkRateBitsPerSecond: 0, CgroupID: 1, ActiveDownloads: 1},
-		{Interface: "eth0", LinkRateBitsPerSecond: 100, CgroupID: 0, ActiveDownloads: 1},
+		{Interface: "", LinkRateBitsPerSecond: 100, Cgroup: qos.CgroupSelector{Path: "argo.service", Level: 1}, ActiveDownloads: 1},
+		{Interface: "eth0", LinkRateBitsPerSecond: 0, Cgroup: qos.CgroupSelector{Path: "argo.service", Level: 1}, ActiveDownloads: 1},
+		{Interface: "eth0", LinkRateBitsPerSecond: 100, Cgroup: qos.CgroupSelector{}, ActiveDownloads: 1},
 	}
 	for _, environment := range tests {
 		if _, err := qos.MapPolicy(qos.PolicyBalanced, environment); err == nil {

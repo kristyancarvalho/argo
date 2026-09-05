@@ -23,7 +23,7 @@ func (backend *Backend) Apply(ctx context.Context, state qos.DesiredState) error
 	if !state.Enabled {
 		return fmt.Errorf("cannot apply disabled QoS state")
 	}
-	classification, err := qos.GenerateClassification(state.Interface, state.CgroupID)
+	classification, err := qos.GenerateClassification(state.Interface, state.Cgroup)
 	if err != nil {
 		return err
 	}

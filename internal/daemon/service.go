@@ -74,7 +74,7 @@ type ServiceOptions struct {
 	Profiles                   map[string]Profile
 	TrafficPolicy              qos.Policy
 	TrafficLinkRate            uint64
-	TrafficCgroupID            uint64
+	TrafficCgroup              qos.CgroupSelector
 	TrafficBackend             qos.Backend
 	TelemetryObserver          TelemetryObserver
 	LatencyPolicy              *qos.LatencyPolicy
@@ -136,7 +136,7 @@ type Service struct {
 	trafficController  *qos.Controller
 	trafficPolicy      qos.Policy
 	trafficLinkRate    uint64
-	trafficCgroupID    uint64
+	trafficCgroup      qos.CgroupSelector
 	trafficErrorMutex  sync.RWMutex
 	trafficError       string
 	telemetryObserver  TelemetryObserver
@@ -277,7 +277,7 @@ func NewServiceWithOptions(
 		trafficController:  trafficController,
 		trafficPolicy:      options.TrafficPolicy,
 		trafficLinkRate:    options.TrafficLinkRate,
-		trafficCgroupID:    options.TrafficCgroupID,
+		trafficCgroup:      options.TrafficCgroup,
 		telemetryObserver:  options.TelemetryObserver,
 		latencyPolicy:      options.LatencyPolicy,
 	}

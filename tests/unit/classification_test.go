@@ -7,13 +7,14 @@ import (
 )
 
 func TestClassificationRuleGeneration(t *testing.T) {
-	plan, err := qos.GenerateClassification("wlan0", 42)
+	selector := qos.CgroupSelector{Path: "user.slice/argo.service", Level: 2}
+	plan, err := qos.GenerateClassification("wlan0", selector)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !plan.Enabled || plan.Interface != "wlan0" ||
 		plan.ArgoRule.Class != qos.TrafficClassArgo ||
-		plan.ArgoRule.CgroupID != 42 ||
+		plan.ArgoRule.Cgroup != selector ||
 		plan.ArgoRule.PacketMark != qos.ArgoPacketMark ||
 		plan.ArgoRule.MarkMask != qos.ArgoPacketMarkMask ||
 		plan.DefaultClass != qos.TrafficClassDefault {
@@ -25,13 +26,14 @@ func TestClassificationRuleGeneration(t *testing.T) {
 }
 
 func TestClassificationRejectsInvalidPlans(t *testing.T) {
-	if _, err := qos.GenerateClassification("", 42); err == nil {
+	selector := qos.CgroupSelector{Path: "argo.service", Level: 1}
+	if _, err := qos.GenerateClassification("", selector); err == nil {
 		t.Fatal("classification without interface succeeded")
 	}
-	if _, err := qos.GenerateClassification("eth0", 0); err == nil {
+	if _, err := qos.GenerateClassification("eth0", qos.CgroupSelector{}); err == nil {
 		t.Fatal("classification without cgroup succeeded")
 	}
-	valid, err := qos.GenerateClassification("eth0", 42)
+	valid, err := qos.GenerateClassification("eth0", selector)
 	if err != nil {
 		t.Fatal(err)
 	}

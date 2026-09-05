@@ -23,18 +23,18 @@ type Intent struct {
 }
 
 type DesiredState struct {
-	Enabled               bool   `json:"enabled"`
-	Policy                Policy `json:"policy"`
-	Interface             string `json:"interface"`
-	LinkRateBitsPerSecond uint64 `json:"link_rate_bits_per_second,omitempty"`
-	ArgoRateBitsPerSecond uint64 `json:"argo_rate_bits_per_second,omitempty"`
-	CgroupID              uint64 `json:"cgroup_id,omitempty"`
+	Enabled               bool           `json:"enabled"`
+	Policy                Policy         `json:"policy"`
+	Interface             string         `json:"interface"`
+	LinkRateBitsPerSecond uint64         `json:"link_rate_bits_per_second,omitempty"`
+	ArgoRateBitsPerSecond uint64         `json:"argo_rate_bits_per_second,omitempty"`
+	Cgroup                CgroupSelector `json:"cgroup,omitempty"`
 }
 
 type PolicyEnvironment struct {
 	Interface             string
 	LinkRateBitsPerSecond uint64
-	CgroupID              uint64
+	Cgroup                CgroupSelector
 	ActiveDownloads       int
 }
 
@@ -80,7 +80,7 @@ func (state DesiredState) Validate() error {
 	}
 	if !state.Enabled {
 		if state.Policy != PolicyOff || state.Interface != "" || state.LinkRateBitsPerSecond != 0 ||
-			state.ArgoRateBitsPerSecond != 0 || state.CgroupID != 0 {
+			state.ArgoRateBitsPerSecond != 0 || state.Cgroup != (CgroupSelector{}) {
 			return fmt.Errorf("disabled QoS state must contain only the off policy")
 		}
 		return nil
@@ -91,11 +91,11 @@ func (state DesiredState) Validate() error {
 	if err := validateInterface(state.Interface); err != nil {
 		return err
 	}
-	configured := state.LinkRateBitsPerSecond != 0 || state.ArgoRateBitsPerSecond != 0 || state.CgroupID != 0
+	configured := state.LinkRateBitsPerSecond != 0 || state.ArgoRateBitsPerSecond != 0 || state.Cgroup != (CgroupSelector{})
 	if configured && (state.LinkRateBitsPerSecond == 0 ||
 		state.ArgoRateBitsPerSecond == 0 ||
 		state.ArgoRateBitsPerSecond >= state.LinkRateBitsPerSecond ||
-		state.CgroupID == 0) {
+		state.Cgroup.Validate() != nil) {
 		return fmt.Errorf("enabled QoS shaping fields must define valid link rate, Argo rate, and cgroup")
 	}
 
@@ -115,7 +115,7 @@ func MapPolicy(policy Policy, environment PolicyEnvironment) (DesiredState, erro
 	if err := validateInterface(environment.Interface); err != nil {
 		return DesiredState{}, err
 	}
-	if environment.LinkRateBitsPerSecond < 2 || environment.CgroupID == 0 {
+	if environment.LinkRateBitsPerSecond < 2 || environment.Cgroup.Validate() != nil {
 		return DesiredState{}, fmt.Errorf("policy requires configured link rate and Argo cgroup")
 	}
 	var percentage uint64
@@ -139,7 +139,7 @@ func MapPolicy(policy Policy, environment PolicyEnvironment) (DesiredState, erro
 		Interface:             environment.Interface,
 		LinkRateBitsPerSecond: environment.LinkRateBitsPerSecond,
 		ArgoRateBitsPerSecond: argoRate,
-		CgroupID:              environment.CgroupID,
+		Cgroup:                environment.Cgroup,
 	}
 	if err := state.Validate(); err != nil {
 		return DesiredState{}, err

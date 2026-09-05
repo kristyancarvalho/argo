@@ -121,7 +121,7 @@ func newLatencyPolicyService(
 		MaximumConcurrentDownloads: 1,
 		NetworkObserver:            networkObserver,
 		TrafficLinkRate:            100_000_000,
-		TrafficCgroupID:            42,
+		TrafficCgroup:              qos.CgroupSelector{Path: "argo.service", Level: 1},
 		TrafficBackend:             backend,
 		TelemetryObserver:          telemetryObserver,
 		LatencyPolicy:              policy,

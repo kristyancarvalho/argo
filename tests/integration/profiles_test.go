@@ -68,7 +68,7 @@ func TestAdaptiveProfileSwitchReconcilesActiveDownload(t *testing.T) {
 		MaximumConcurrentDownloads: 1,
 		NetworkObserver:            observer,
 		TrafficLinkRate:            100_000_000,
-		TrafficCgroupID:            42,
+		TrafficCgroup:              qos.CgroupSelector{Path: "argo.service", Level: 1},
 		TrafficBackend:             backend,
 		Profiles: map[string]daemon.Profile{
 			"responsive": {
@@ -107,7 +107,7 @@ func TestProfileSwitchReportsQoSFailure(t *testing.T) {
 		MaximumConcurrentDownloads: 1,
 		NetworkObserver:            observer,
 		TrafficLinkRate:            100_000_000,
-		TrafficCgroupID:            42,
+		TrafficCgroup:              qos.CgroupSelector{Path: "argo.service", Level: 1},
 		TrafficBackend:             backend,
 		Profiles: map[string]daemon.Profile{
 			"throughput": {
