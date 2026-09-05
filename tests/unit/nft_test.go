@@ -26,6 +26,7 @@ func TestNftablesClassificationRuleset(t *testing.T) {
 		"type route hook output priority mangle; policy accept;",
 		`oifname "wlan0" socket cgroupv2 level 2 "user.slice/argo.service"`,
 		"counter",
+		"ct mark set ((ct mark & 0xffff0000) | 0x0000a400)",
 		"meta mark set ((meta mark & 0xffff0000) | 0x0000a400)",
 	} {
 		if !strings.Contains(ruleset, expected) {
