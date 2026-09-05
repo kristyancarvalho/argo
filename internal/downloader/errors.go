@@ -37,6 +37,15 @@ type RangeMismatchError struct {
 	ContentRange string
 }
 
+type RepresentationChangedError struct {
+	Expected string
+	Actual   string
+}
+
+func (err RepresentationChangedError) Error() string {
+	return fmt.Sprintf("remote representation changed from %s to %s; retry to start a clean transfer", err.Expected, err.Actual)
+}
+
 func (err RangeMismatchError) Error() string {
 	return fmt.Sprintf(
 		"range response %q does not match chunk %d bytes %d-%d",

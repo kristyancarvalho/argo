@@ -258,6 +258,7 @@ func parallelServer(
 ) *httptest.Server {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("ETag", `"parallel-v1"`)
 		start, end, err := requestedRange(request.Header.Get("Range"), int64(len(payload)))
 		if err != nil {
 			http.Error(response, err.Error(), http.StatusRequestedRangeNotSatisfiable)

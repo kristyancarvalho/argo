@@ -89,7 +89,7 @@ func (engine *Engine) downloadParallel(
 			results <- engine.downloadChunk(
 				workerContext,
 				download,
-				metadata.TotalSize,
+				metadata,
 				partial,
 				chunk,
 				downloaded,
@@ -147,7 +147,7 @@ func (engine *Engine) downloadParallel(
 func (engine *Engine) downloadChunk(
 	ctx context.Context,
 	download model.Download,
-	totalSize int64,
+	metadata RemoteMetadata,
 	destination *os.File,
 	chunk Chunk,
 	downloaded int64,
@@ -160,6 +160,7 @@ func (engine *Engine) downloadChunk(
 	}
 	requestStart := chunk.Start + downloaded
 	request.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", requestStart, chunk.End))
+	bindRepresentation(request, metadata)
 	response, err := engine.httpClient.Do(request)
 	if err != nil {
 		return fmt.Errorf("request chunk %d: %w", chunk.Index, err)
@@ -167,12 +168,15 @@ func (engine *Engine) downloadChunk(
 	defer func() {
 		_ = response.Body.Close()
 	}()
+	if err := validateRepresentation(response, metadata); err != nil {
+		return err
+	}
 	if response.StatusCode != http.StatusPartialContent {
 		return HTTPStatusError{StatusCode: response.StatusCode, Status: response.Status}
 	}
 	contentRange := response.Header.Get("Content-Range")
 	start, end, responseTotal, err := parseContentRange(contentRange)
-	if err != nil || start != requestStart || end != chunk.End || responseTotal != totalSize {
+	if err != nil || start != requestStart || end != chunk.End || responseTotal != metadata.TotalSize {
 		return RangeMismatchError{Chunk: chunk, ContentRange: contentRange}
 	}
 
