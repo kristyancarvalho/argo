@@ -81,7 +81,15 @@ func testQoSKernelLifecycle(t *testing.T) {
 		_ = worker.Process.Kill()
 		t.Fatalf("move packet worker to delegated cgroup: %v", err)
 	}
-	backend := qosbackend.New()
+	statePath := filepath.Join(t.TempDir(), "argo-qosd.state")
+	backend, err := qosbackend.NewPersistent(qosbackend.New(), statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	controller, err := qos.NewController(backend)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, test := range []struct {
 		policy qos.Policy
 		rate   uint64
@@ -97,7 +105,7 @@ func testQoSKernelLifecycle(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := backend.Apply(context.Background(), state); err != nil {
+		if err := controller.Reconcile(context.Background(), state); err != nil {
 			t.Fatalf("apply %s policy: %v", test.policy, err)
 		}
 		classes := runKernelCommand(t, "tc", "class", "show", "dev", "argo-test")
@@ -147,7 +155,22 @@ func testQoSKernelLifecycle(t *testing.T) {
 	if len(matches) != 2 || matches[1] != "1" {
 		t.Fatalf("classification counted unrelated cgroup traffic: %q", rules)
 	}
-	if err := backend.Remove(context.Background(), "argo-test"); err != nil {
+	runKernelCommand(t, "nft", "add", "table", "inet", "argo_unrelated")
+	recoveredBackend, err := qosbackend.NewPersistent(qosbackend.New(), statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := qos.NewController(recoveredBackend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := recovered.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, applied := recovered.Current(); !applied {
+		t.Fatal("restarted controller did not recover applied state")
+	}
+	if err := recovered.Remove(context.Background(), "argo-test"); err != nil {
 		t.Fatal(err)
 	}
 	qdiscs := runKernelCommand(t, "tc", "qdisc", "show", "dev", "argo-test")
@@ -157,6 +180,10 @@ func testQoSKernelLifecycle(t *testing.T) {
 	command := exec.Command("nft", "list", "table", "inet", "argo")
 	if err := command.Run(); err == nil {
 		t.Fatal("Argo nftables table remains after cleanup")
+	}
+	runKernelCommand(t, "nft", "list", "table", "inet", "argo_unrelated")
+	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
+		t.Fatalf("QoS recovery state remains after cleanup: %v", err)
 	}
 }
 

@@ -116,6 +116,7 @@ type Service struct {
 	cancel             context.CancelFunc
 	waitGroup          sync.WaitGroup
 	closeOnce          sync.Once
+	closeErr           error
 	activeMutex        sync.Mutex
 	activeCancels      map[model.DownloadID]context.CancelFunc
 	networkObserver    NetworkObserver
@@ -378,9 +379,14 @@ func (service *Service) Close() error {
 	service.closeOnce.Do(func() {
 		service.cancel()
 		service.waitGroup.Wait()
+		if service.trafficController != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			service.closeErr = service.trafficController.Reconcile(ctx, qos.DesiredState{Policy: qos.PolicyOff})
+			cancel()
+		}
 	})
 
-	return nil
+	return service.closeErr
 }
 
 func (service *Service) add(ctx context.Context, payload json.RawMessage) (ipc.AddResponse, error) {

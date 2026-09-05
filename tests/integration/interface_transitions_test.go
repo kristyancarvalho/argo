@@ -131,3 +131,32 @@ func TestUnavailableQoSHelperDoesNotStopNetworkObservationOrDownloads(t *testing
 	}
 	engine.release("unavailable")
 }
+
+func TestDaemonShutdownRemovesAppliedQoSState(t *testing.T) {
+	store := openTestStore(t)
+	engine := newControlledDownloadEngine(store, "shutdown")
+	observer := newControlledNetworkObserver()
+	backend := &trafficPolicyBackend{}
+	service, err := daemon.NewServiceWithOptions(context.Background(), store, engine, daemon.ServiceOptions{
+		MaximumConcurrentDownloads: 1,
+		NetworkObserver:            observer,
+		TrafficPolicy:              qos.PolicyBalanced,
+		TrafficLinkRate:            100_000_000,
+		TrafficCgroup:              qos.CgroupSelector{Path: "argo.service", Level: 1},
+		TrafficBackend:             backend,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	identifier := addScheduledDownload(t, service, "shutdown")
+	assertStartedDownload(t, engine, identifier)
+	observer.send(t, network.Snapshot{Connected: true, Interface: "eth0"})
+	waitForTrafficPolicy(t, backend, qos.PolicyBalanced, 50_000_000)
+	if err := service.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, removed := backend.snapshot()
+	if len(removed) != 1 || removed[0] != "eth0" {
+		t.Fatalf("daemon shutdown cleanup is %+v", removed)
+	}
+}
