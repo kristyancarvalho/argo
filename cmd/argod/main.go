@@ -151,6 +151,13 @@ func run(arguments []string) (runError error) {
 	if err != nil {
 		return err
 	}
+	instanceLock, err := storage.AcquireInstanceLock(databasePath)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		runError = errors.Join(runError, instanceLock.Close())
+	}()
 	store, err := storage.Open(ctx, databasePath)
 	if err != nil {
 		return err
