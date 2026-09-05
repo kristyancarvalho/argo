@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/kristyancarvalho/argo/internal/model"
+	"golang.org/x/sys/unix"
 )
 
 func (engine *Engine) prepareResumeState(
@@ -53,14 +54,21 @@ func (engine *Engine) ValidateCanceledResume(ctx context.Context, download model
 	if err := engine.preparePartial(download); err != nil {
 		return ResumeUnavailableError{ID: download.ID.String(), Reason: err.Error()}
 	}
-	info, err := os.Stat(engine.partialPath(download.ID))
-	if errors.Is(err, os.ErrNotExist) {
+	partial, err := engine.openPartialFile(download.ID, unix.O_RDONLY)
+	if errors.Is(err, unix.ENOENT) {
 		return ResumeUnavailableError{ID: download.ID.String(), Reason: "partial data is missing"}
 	}
 	if err != nil {
 		return ResumeUnavailableError{ID: download.ID.String(), Reason: err.Error()}
 	}
-	if !info.Mode().IsRegular() || info.Size() < download.DownloadedBytes {
+	defer func() {
+		_ = partial.Close()
+	}()
+	info, err := partial.Stat()
+	if err != nil {
+		return ResumeUnavailableError{ID: download.ID.String(), Reason: err.Error()}
+	}
+	if info.Size() < download.DownloadedBytes {
 		return ResumeUnavailableError{ID: download.ID.String(), Reason: "partial data is incomplete or invalid"}
 	}
 	metadata, err := NewInspector(engine.httpClient).Inspect(ctx, download.URL)

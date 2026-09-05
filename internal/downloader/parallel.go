@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/kristyancarvalho/argo/internal/model"
+	"golang.org/x/sys/unix"
 )
 
 type ChunkProgress struct {
@@ -116,15 +117,15 @@ func (engine *Engine) downloadParallel(
 	if err := partial.Sync(); err != nil {
 		return engine.fail(ctx, download.ID, fmt.Errorf("sync parallel partial file: %w", err))
 	}
-	if err := partial.Close(); err != nil {
-		partialOpen = false
-		return engine.fail(ctx, download.ID, fmt.Errorf("close parallel partial file: %w", err))
-	}
-	partialOpen = false
-	finalPath, err = engine.finalize(download, finalPath)
+	finalPath, err = engine.finalize(download, finalPath, partial)
 	if err != nil {
 		return engine.fail(ctx, download.ID, err)
 	}
+	if err := partial.Close(); err != nil {
+		partialOpen = false
+		return engine.fail(ctx, download.ID, fmt.Errorf("close finalized parallel partial file: %w", err))
+	}
+	partialOpen = false
 	filename := filepath.Base(finalPath)
 	if filename != download.Filename {
 		if err := engine.store.UpdateDownloadFilename(ctx, download.ID, filename, engine.now()); err != nil {
@@ -318,7 +319,7 @@ func (engine *Engine) prepareParallelFile(download model.Download, totalSize int
 	if err := engine.preparePartial(download); err != nil {
 		return nil, "", 0, err
 	}
-	partial, err := os.OpenFile(engine.partialPath(download.ID), os.O_CREATE|os.O_RDWR, 0o600)
+	partial, err := engine.openPartialFile(download.ID, unix.O_CREAT|unix.O_RDWR)
 	if err != nil {
 		return nil, "", 0, fmt.Errorf("create parallel partial file: %w", err)
 	}
