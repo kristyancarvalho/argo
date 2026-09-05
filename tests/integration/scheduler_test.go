@@ -32,6 +32,10 @@ func (engine *controlledDownloadEngine) SetRateLimit(bytesPerSecond int64) error
 	return nil
 }
 
+func (engine *controlledDownloadEngine) ValidateCanceledResume(context.Context, model.Download) error {
+	return nil
+}
+
 func (engine *controlledDownloadEngine) currentRateLimit() int64 {
 	engine.mutex.Lock()
 	defer engine.mutex.Unlock()

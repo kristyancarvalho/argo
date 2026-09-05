@@ -120,6 +120,9 @@ type Service struct {
 	activeMutex        sync.Mutex
 	activeCancels      map[model.DownloadID]context.CancelFunc
 	networkObserver    NetworkObserver
+	networkReady       chan struct{}
+	networkReadyOnce   sync.Once
+	networkPolicyMutex sync.Mutex
 	networkMutex       sync.RWMutex
 	networkSnapshot    network.Snapshot
 	networkAvailable   bool
@@ -266,6 +269,7 @@ func NewServiceWithOptions(
 		cancel:             cancel,
 		activeCancels:      make(map[model.DownloadID]context.CancelFunc),
 		networkObserver:    options.NetworkObserver,
+		networkReady:       make(chan struct{}),
 		pauseOnMetered:     options.PauseOnMetered,
 		resumeAfterMetered: options.ResumeAfterMetered,
 		meteredPaused:      make(map[model.DownloadID]struct{}),
@@ -283,6 +287,9 @@ func NewServiceWithOptions(
 		latencyPolicy:      options.LatencyPolicy,
 	}
 	service.partialCleaner, _ = engine.(PartialCleaner)
+	if service.networkObserver == nil {
+		service.markNetworkReady()
+	}
 	service.waitGroup.Add(1)
 	go service.runScheduler()
 	if service.networkObserver != nil {
@@ -407,6 +414,14 @@ func (service *Service) queueDownload(ctx context.Context, download model.Downlo
 	if err := service.store.CreateDownload(ctx, download); err != nil {
 		return ipc.AddResponse{}, fmt.Errorf("persist added download: %w", err)
 	}
+	blocked, err := service.pauseAdmissionOnMetered(ctx, download.ID)
+	if err != nil {
+		return ipc.AddResponse{}, err
+	}
+	if blocked {
+		download.Status = model.StatusPaused
+		return addResponse(download), nil
+	}
 	if err := service.enqueue(ctx, download.ID, download.Priority); err != nil {
 		now := time.Now().UTC()
 		statusErr := service.store.UpdateDownloadStatus(
@@ -420,12 +435,16 @@ func (service *Service) queueDownload(ctx context.Context, download model.Downlo
 	}
 	_ = service.reconcileTrafficPolicy(context.WithoutCancel(ctx))
 
+	return addResponse(download), nil
+}
+
+func addResponse(download model.Download) ipc.AddResponse {
 	return ipc.AddResponse{
 		ID:          download.ID.String(),
 		Filename:    download.Filename,
 		Destination: download.Destination,
 		Status:      string(download.Status),
-	}, nil
+	}
 }
 
 func (service *Service) pause(ctx context.Context, payload json.RawMessage) (ipc.DownloadActionResponse, error) {
@@ -499,8 +518,24 @@ func (service *Service) resume(ctx context.Context, payload json.RawMessage) (ip
 			Status: download.Status,
 		}
 	}
+	if download.Status == model.StatusPaused {
+		blocked, err := service.pauseAdmissionOnMetered(ctx, identifier)
+		if err != nil {
+			return ipc.DownloadActionResponse{}, err
+		}
+		if blocked {
+			return actionResponse(identifier, model.StatusPaused), nil
+		}
+	}
 	if err := service.store.UpdateDownloadStatus(ctx, identifier, status, time.Now().UTC(), ""); err != nil {
 		return ipc.DownloadActionResponse{}, err
+	}
+	blocked, err := service.pauseAdmissionOnMetered(ctx, identifier)
+	if err != nil {
+		return ipc.DownloadActionResponse{}, err
+	}
+	if blocked {
+		return actionResponse(identifier, model.StatusPaused), nil
 	}
 	if err := service.enqueue(ctx, identifier, download.Priority); err != nil {
 		return ipc.DownloadActionResponse{}, err
@@ -755,8 +790,10 @@ func (service *Service) runScheduler() {
 	defer service.waitGroup.Done()
 	queue := scheduler.NewQueue(service.initial)
 	maximumActive := service.maximumActive
+	networkReady := false
+	networkReadyChannel := (<-chan struct{})(service.networkReady)
 	for {
-		for queue.Active() < maximumActive {
+		for networkReady && queue.Active() < maximumActive {
 			identifier, available := queue.Next()
 			if !available {
 				break
@@ -766,6 +803,9 @@ func (service *Service) runScheduler() {
 		select {
 		case <-service.ctx.Done():
 			return
+		case <-networkReadyChannel:
+			networkReady = true
+			networkReadyChannel = nil
 		case entry := <-service.jobs:
 			queue.Enqueue(entry)
 		case update := <-service.priorities:
@@ -804,6 +844,9 @@ func (service *Service) setProfile(ctx context.Context, payload json.RawMessage)
 	service.latencyPolicy = profile.LatencyPolicy
 	service.profileMutex.Unlock()
 	if err := service.updateSchedulerLimit(ctx, profile.MaximumConcurrentDownloads); err != nil {
+		return ipc.ProfileResponse{}, err
+	}
+	if err := service.reconcileMeteredAdmission(ctx); err != nil {
 		return ipc.ProfileResponse{}, err
 	}
 	qosError := service.reconcileTrafficPolicy(ctx)
@@ -887,6 +930,10 @@ func (service *Service) process(
 		return
 	}
 	if download.Status != model.StatusQueued && download.Status != model.StatusDownloading {
+		return
+	}
+	blocked, err := service.pauseAdmissionOnMetered(service.ctx, identifier)
+	if err != nil || blocked {
 		return
 	}
 

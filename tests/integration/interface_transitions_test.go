@@ -30,10 +30,10 @@ func TestQoSFollowsInterfaceTransitionsAndDisconnects(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer closeSchedulerService(t, service)
+	observer.send(t, network.Snapshot{Connected: true, Interface: "eth0"})
 	identifier := addScheduledDownload(t, service, "transition")
 	assertStartedDownload(t, engine, identifier)
 
-	observer.send(t, network.Snapshot{Connected: true, Interface: "eth0"})
 	waitForTrafficPolicy(t, backend, qos.PolicyBalanced, 50_000_000)
 	observer.send(t, network.Snapshot{Connected: true, Interface: "wlan0"})
 	applied, removed := backend.snapshot()
@@ -108,11 +108,11 @@ func TestUnavailableQoSHelperDoesNotStopNetworkObservationOrDownloads(t *testing
 		t.Fatal(err)
 	}
 	defer closeSchedulerService(t, service)
+	snapshot := network.Snapshot{Connected: true, Interface: "eth0"}
+	observer.send(t, snapshot)
 	identifier := addScheduledDownload(t, service, "unavailable")
 	assertStartedDownload(t, engine, identifier)
 
-	snapshot := network.Snapshot{Connected: true, Interface: "eth0"}
-	observer.send(t, snapshot)
 	observer.send(t, snapshot)
 	if backend.count() != 1 {
 		t.Fatalf("unchanged network state caused %d helper attempts", backend.count())
@@ -148,9 +148,9 @@ func TestDaemonShutdownRemovesAppliedQoSState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	observer.send(t, network.Snapshot{Connected: true, Interface: "eth0"})
 	identifier := addScheduledDownload(t, service, "shutdown")
 	assertStartedDownload(t, engine, identifier)
-	observer.send(t, network.Snapshot{Connected: true, Interface: "eth0"})
 	waitForTrafficPolicy(t, backend, qos.PolicyBalanced, 50_000_000)
 	if err := service.Close(); err != nil {
 		t.Fatal(err)
