@@ -10,7 +10,9 @@ import (
 )
 
 func TestNftablesClassificationRuleset(t *testing.T) {
-	plan, err := qos.GenerateClassification("wlan0", 4242)
+	plan, err := qos.GenerateClassification("wlan0", qos.CgroupSelector{
+		Path: "user.slice/argo.service", Level: 2,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,7 +24,8 @@ func TestNftablesClassificationRuleset(t *testing.T) {
 		"table inet argo",
 		"chain output",
 		"type route hook output priority mangle; policy accept;",
-		`oifname "wlan0" meta cgroup 4242`,
+		`oifname "wlan0" socket cgroupv2 level 2 "user.slice/argo.service"`,
+		"counter",
 		"meta mark set ((meta mark & 0xffff0000) | 0x0000a400)",
 	} {
 		if !strings.Contains(ruleset, expected) {

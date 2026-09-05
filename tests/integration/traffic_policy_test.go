@@ -53,7 +53,7 @@ func TestTrafficPoliciesSwitchIndependentlyFromDownloadPriority(t *testing.T) {
 		NetworkObserver:            observer,
 		TrafficPolicy:              qos.PolicyOff,
 		TrafficLinkRate:            100_000_000,
-		TrafficCgroupID:            42,
+		TrafficCgroup:              qos.CgroupSelector{Path: "argo.service", Level: 1},
 		TrafficBackend:             backend,
 	})
 	if err != nil {

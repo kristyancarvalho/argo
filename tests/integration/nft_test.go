@@ -62,7 +62,9 @@ func TestNftablesBackendAppliesIdempotentlyAndCleansUp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := qos.GenerateClassification("eth0", 42)
+	plan, err := qos.GenerateClassification("eth0", qos.CgroupSelector{
+		Path: "user.slice/argo.service", Level: 2,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -89,7 +89,7 @@ func MapAdaptivePolicy(environment PolicyEnvironment, rate uint64) (DesiredState
 	if err := validateInterface(environment.Interface); err != nil {
 		return DesiredState{}, err
 	}
-	if environment.LinkRateBitsPerSecond < 2 || environment.CgroupID == 0 {
+	if environment.LinkRateBitsPerSecond < 2 || environment.Cgroup.Validate() != nil {
 		return DesiredState{}, fmt.Errorf("policy requires configured link rate and Argo cgroup")
 	}
 	state := DesiredState{
@@ -98,7 +98,7 @@ func MapAdaptivePolicy(environment PolicyEnvironment, rate uint64) (DesiredState
 		Interface:             environment.Interface,
 		LinkRateBitsPerSecond: environment.LinkRateBitsPerSecond,
 		ArgoRateBitsPerSecond: rate,
-		CgroupID:              environment.CgroupID,
+		Cgroup:                environment.Cgroup,
 	}
 	if err := state.Validate(); err != nil {
 		return DesiredState{}, err

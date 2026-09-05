@@ -34,7 +34,8 @@ func TestClassificationLifecycleAndInterfaceChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ethernet, err := qos.GenerateClassification("eth0", 42)
+	selector := qos.CgroupSelector{Path: "user.slice/argo.service", Level: 2}
+	ethernet, err := qos.GenerateClassification("eth0", selector)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +47,7 @@ func TestClassificationLifecycleAndInterfaceChange(t *testing.T) {
 	if len(backend.applied) != 1 || len(backend.removed) != 0 {
 		t.Fatalf("unexpected idempotent operations: %+v %+v", backend.applied, backend.removed)
 	}
-	wifi, err := qos.GenerateClassification("wlan0", 42)
+	wifi, err := qos.GenerateClassification("wlan0", selector)
 	if err != nil {
 		t.Fatal(err)
 	}
