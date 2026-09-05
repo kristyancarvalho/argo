@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/kristyancarvalho/argo/internal/qos"
+	"github.com/kristyancarvalho/argo/internal/qos/tc"
 	"github.com/kristyancarvalho/argo/internal/qosbackend"
 )
 
@@ -63,7 +64,7 @@ func testQoSKernelLifecycle(t *testing.T) {
 	runKernelCommand(t, "ip", "address", "add", "192.0.2.1/24", "dev", "argo-test")
 	runKernelCommand(t, "ip", "link", "set", "argo-test", "up")
 	cgroup, cleanup := createPacketCgroup(t)
-	defer cleanup()
+	t.Cleanup(cleanup)
 	worker := exec.Command(os.Args[0], "-test.run=^TestQoSKernelPolicyLifecycle$")
 	worker.Env = append(os.Environ(), "ARGO_QOS_PACKET_WORKER=192.0.2.2:9")
 	signal, err := worker.StdinPipe()
@@ -73,6 +74,12 @@ func testQoSKernelLifecycle(t *testing.T) {
 	if err := worker.Start(); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		if worker.ProcessState == nil {
+			_ = worker.Process.Kill()
+			_ = worker.Wait()
+		}
+	})
 	if err := os.WriteFile(
 		filepath.Join("/sys/fs/cgroup", cgroup.Path, "cgroup.procs"),
 		[]byte(strconv.Itoa(worker.Process.Pid)),
@@ -108,8 +115,8 @@ func testQoSKernelLifecycle(t *testing.T) {
 		if err := controller.Reconcile(context.Background(), state); err != nil {
 			t.Fatalf("apply %s policy: %v", test.policy, err)
 		}
-		classes := runKernelCommand(t, "tc", "class", "show", "dev", "argo-test")
-		for _, value := range []string{"class htb a400:10", "class htb a400:20", formatMegabits(test.rate)} {
+		classes := runKernelCommand(t, "tc", "class", "show", "dev", tc.IFBInterface("argo-test"))
+		for _, value := range []string{"class htb a400:10", "class htb a400:20", formatMegabits(test.rate * 95 / 100)} {
 			if !strings.Contains(classes, value) {
 				t.Fatalf("%s classes %q do not contain %q", test.policy, classes, value)
 			}
@@ -139,6 +146,7 @@ func testQoSKernelLifecycle(t *testing.T) {
 	for _, value := range []string{
 		fmt.Sprintf("socket cgroupv2 level %d %q", cgroup.Level, cgroup.Path),
 		"meta mark set",
+		"ct mark set",
 		"0x0000a400",
 	} {
 		if !strings.Contains(rules, value) {
@@ -174,8 +182,11 @@ func testQoSKernelLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	qdiscs := runKernelCommand(t, "tc", "qdisc", "show", "dev", "argo-test")
-	if strings.Contains(qdiscs, "a400:") {
-		t.Fatalf("Argo qdisc remains after cleanup: %q", qdiscs)
+	if strings.Contains(qdiscs, "ingress") {
+		t.Fatalf("Argo ingress qdisc remains after cleanup: %q", qdiscs)
+	}
+	if err := exec.Command("ip", "link", "show", "dev", tc.IFBInterface("argo-test")).Run(); err == nil {
+		t.Fatal("Argo IFB remains after cleanup")
 	}
 	command := exec.Command("nft", "list", "table", "inet", "argo")
 	if err := command.Run(); err == nil {
@@ -217,5 +228,8 @@ func runKernelCommand(t *testing.T, name string, arguments ...string) string {
 }
 
 func formatMegabits(bits uint64) string {
+	if bits%1_000_000 != 0 {
+		return fmt.Sprintf("rate %dKbit", bits/1_000)
+	}
 	return fmt.Sprintf("rate %dMbit", bits/1_000_000)
 }

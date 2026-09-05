@@ -13,7 +13,7 @@ func TestTcDesiredTreeGeneration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tree.DefaultRateBitsPerSecond != 40_000_000 || len(tree.Commands) != 7 {
+	if tree.ShapingRateBitsPerSecond != 95_000_000 || tree.DefaultRateBitsPerSecond != 38_000_000 || len(tree.Commands) != 7 {
 		t.Fatalf("unexpected tc tree: %+v", tree)
 	}
 	joined := make([]string, len(tree.Commands))
@@ -21,10 +21,13 @@ func TestTcDesiredTreeGeneration(t *testing.T) {
 		joined[index] = strings.Join(command.Arguments, " ")
 	}
 	commands := strings.Join(joined, "\n")
+	if tree.IFBInterface != tc.IFBInterface("eth0") || tree.IFBInterface == tree.Interface {
+		t.Fatalf("unexpected IFB interface: %+v", tree)
+	}
 	for _, expected := range []string{
-		"root handle a400: htb default 20",
-		"classid a400:10 htb rate 60000000bit ceil 100000000bit",
-		"classid a400:20 htb rate 40000000bit ceil 100000000bit",
+		"dev " + tree.IFBInterface + " root handle a400: htb default 20",
+		"classid a400:10 htb rate 57000000bit ceil 95000000bit",
+		"classid a400:20 htb rate 38000000bit ceil 95000000bit",
 		"parent a400:10 handle a410: fq_codel",
 		"parent a400:20 handle a420: fq_codel",
 		"handle 0xa400 fw classid a400:10",
@@ -43,6 +46,9 @@ func TestTcRejectsInvalidBandwidthAndMissingExecutable(t *testing.T) {
 	}
 	if _, err := tc.GenerateTree("eth 0", 100, 50); err == nil {
 		t.Fatal("invalid interface succeeded")
+	}
+	if len(tc.IFBInterface("interface-with-a-long-name")) > 15 {
+		t.Fatal("derived IFB name exceeds Linux interface limit")
 	}
 	_, err := tc.NewWithExecutable("argo-tc-command-that-does-not-exist")
 	var unavailable tc.UnavailableError
