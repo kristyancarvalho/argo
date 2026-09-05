@@ -20,6 +20,7 @@ const (
 	acceptInterval     = 250 * time.Millisecond
 	connectionTimeout  = 5 * time.Second
 	DefaultSocketPath  = "/run/argo/argo-qosd.sock"
+	DefaultStatePath   = "/run/argo/argo-qosd.state"
 )
 
 type Handler interface {

@@ -40,6 +40,7 @@ func TestSystemdQoSHelperSystemServiceDefinition(t *testing.T) {
 		"ExecStart=/usr/bin/argo-qosd",
 		"RuntimeDirectory=argo",
 		"RuntimeDirectoryMode=0700",
+		"RuntimeDirectoryPreserve=restart",
 		"Restart=on-failure",
 		"KillSignal=SIGTERM",
 		"CapabilityBoundingSet=CAP_NET_ADMIN",
