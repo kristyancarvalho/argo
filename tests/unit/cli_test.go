@@ -136,6 +136,29 @@ func TestCLIStatusShowsNetworkAndProfile(t *testing.T) {
 	}
 }
 
+type secretShowClient struct {
+	*cliClient
+}
+
+func (client *secretShowClient) Show(context.Context, string) (ipc.Download, error) {
+	return ipc.Download{
+		ID: "secret", URL: "https://user:password@example.test/file?token=secret",
+		Error: "GET https://user:password@example.test/file?token=secret: failed",
+	}, nil
+}
+
+func TestCLIShowRedactsSourceAndErrorSecrets(t *testing.T) {
+	var output bytes.Buffer
+	client := &secretShowClient{cliClient: &cliClient{}}
+	if err := cli.Run(context.Background(), client, &output, []string{"show", "secret"}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(output.String(), "password") || strings.Contains(output.String(), "token=secret") ||
+		!strings.Contains(output.String(), "https://redacted@example.test/file?redacted") {
+		t.Fatalf("show output did not redact secrets: %q", output.String())
+	}
+}
+
 type unavailableNetworkClient struct {
 	*cliClient
 }

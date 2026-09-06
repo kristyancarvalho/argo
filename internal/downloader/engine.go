@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/kristyancarvalho/argo/internal/diagnostic"
 	"github.com/kristyancarvalho/argo/internal/model"
 	"golang.org/x/sys/unix"
 )
@@ -447,6 +448,7 @@ func (engine *Engine) copy(
 }
 
 func (engine *Engine) fail(ctx context.Context, id model.DownloadID, downloadError error) error {
+	downloadError = diagnostic.Error(downloadError)
 	if ctx.Err() != nil {
 		return downloadError
 	}

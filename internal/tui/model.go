@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/kristyancarvalho/argo/internal/console"
+	"github.com/kristyancarvalho/argo/internal/diagnostic"
 	"github.com/kristyancarvalho/argo/internal/ipc"
 )
 
@@ -246,7 +247,7 @@ func (model Model) View() string {
 		view.WriteString(console.Paint(model.color, console.Yellow, "Connecting to daemon..."))
 		view.WriteByte('\n')
 	case model.err != nil:
-		view.WriteString(console.Paint(model.color, console.Red, "Daemon unavailable: "+model.err.Error()))
+		view.WriteString(console.Paint(model.color, console.Red, "Daemon unavailable: "+diagnostic.Text(model.err.Error())))
 		view.WriteByte('\n')
 	default:
 		model.renderNetworkAndQoS(&view)
@@ -283,7 +284,7 @@ func (model Model) View() string {
 		return view.String()
 	}
 	if model.actionErr != nil {
-		view.WriteString(console.Paint(model.color, console.Red, "\nAction failed: "+model.actionErr.Error()))
+		view.WriteString(console.Paint(model.color, console.Red, "\nAction failed: "+diagnostic.Text(model.actionErr.Error())))
 		view.WriteByte('\n')
 	} else if model.notice != "" {
 		view.WriteString("\n")
@@ -357,7 +358,7 @@ func (model Model) renderSelected(view *strings.Builder, width int) {
 	}
 	_, _ = fmt.Fprintf(view, "  ID: %s\n  State: %s    Priority: %s\n", download.ID, download.Status, download.Priority)
 	_, _ = fmt.Fprintf(view, "  File: %s\n", truncateRunes(download.Filename, max(8, width-8)))
-	_, _ = fmt.Fprintf(view, "  Source: %s\n", truncateRunes(download.URL, max(8, width-10)))
+	_, _ = fmt.Fprintf(view, "  Source: %s\n", truncateRunes(diagnostic.URL(download.URL), max(8, width-10)))
 }
 
 func (model Model) renderHelp(view *strings.Builder) {
@@ -387,11 +388,11 @@ func (model Model) renderNetworkAndQoS(view *strings.Builder) {
 		_, _ = fmt.Fprintf(view, "Network: %s  Interface: %s\n", networkState, statusValue(model.status.Network.Interface))
 		_, _ = fmt.Fprintf(view, "Profile: %s  Traffic policy: %s\n", statusValue(model.status.ActiveProfile), statusValue(model.status.Traffic.Policy))
 		if model.status.Traffic.Error != "" {
-			view.WriteString(console.Paint(model.color, console.Red, "QoS error: "+model.status.Traffic.Error))
+			view.WriteString(console.Paint(model.color, console.Red, "QoS error: "+diagnostic.Text(model.status.Traffic.Error)))
 			view.WriteByte('\n')
 		}
 		if model.status.Network.Error != "" {
-			view.WriteString(console.Paint(model.color, console.Red, "Network error: "+model.status.Network.Error))
+			view.WriteString(console.Paint(model.color, console.Red, "Network error: "+diagnostic.Text(model.status.Network.Error)))
 			view.WriteByte('\n')
 		}
 		return
@@ -425,11 +426,11 @@ func (model Model) renderNetworkAndQoS(view *strings.Builder) {
 		view.WriteString("Adaptive limit: unavailable\n")
 	}
 	if model.status.Traffic.Error != "" {
-		view.WriteString(console.Paint(model.color, console.Red, "QoS error: "+model.status.Traffic.Error))
+		view.WriteString(console.Paint(model.color, console.Red, "QoS error: "+diagnostic.Text(model.status.Traffic.Error)))
 		view.WriteByte('\n')
 	}
 	if model.status.Network.Error != "" {
-		view.WriteString(console.Paint(model.color, console.Red, "Network error: "+model.status.Network.Error))
+		view.WriteString(console.Paint(model.color, console.Red, "Network error: "+diagnostic.Text(model.status.Network.Error)))
 		view.WriteByte('\n')
 	}
 	if model.status.Traffic.LatencyAvailable {

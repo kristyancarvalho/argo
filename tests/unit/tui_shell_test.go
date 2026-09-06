@@ -271,6 +271,21 @@ func TestTUIShowsQoSError(t *testing.T) {
 	}
 }
 
+func TestTUIRedactsSourceAndDiagnosticSecrets(t *testing.T) {
+	secretURL := "https://user:password@example.test/file?token=secret"
+	model := loadTUIModel(t, &tuiStatusClient{
+		status: ipc.Status{State: "running", Network: ipc.NetworkStatus{
+			Error: "GET " + secretURL + ": failed",
+		}},
+		downloads: [][]ipc.Download{{{ID: "one", URL: secretURL, Filename: "file", Status: "failed"}}},
+	})
+	view := model.View()
+	if strings.Contains(view, "password") || strings.Contains(view, "token=secret") ||
+		!strings.Contains(view, "https://redacted@example.test/file?redacted") {
+		t.Fatalf("TUI exposed source credentials: %q", view)
+	}
+}
+
 func TestTUIActionsDispatch(t *testing.T) {
 	client := &tuiStatusClient{status: ipc.Status{State: "running"}, downloads: [][]ipc.Download{{{ID: "one"}}}}
 	model := loadTUIModel(t, client)

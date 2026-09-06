@@ -7,6 +7,7 @@ import (
 	"io"
 	"text/tabwriter"
 
+	"github.com/kristyancarvalho/argo/internal/diagnostic"
 	"github.com/kristyancarvalho/argo/internal/ipc"
 )
 
@@ -246,12 +247,12 @@ func runShow(ctx context.Context, client Client, output io.Writer, arguments []s
 		"ID: %s\nFilename: %s\nURL: %s\nDestination: %s\nStatus: %s\nPriority: %s\nProgress: %s\nError: %s\n",
 		download.ID,
 		download.Filename,
-		download.URL,
+		diagnostic.URL(download.URL),
 		download.Destination,
 		download.Status,
 		download.Priority,
 		formatProgress(download),
-		download.Error,
+		diagnostic.Text(download.Error),
 	)
 
 	return err
@@ -355,12 +356,12 @@ func runStatus(ctx context.Context, client Client, output io.Writer, arguments [
 		return err
 	}
 	if status.Traffic.Error != "" {
-		if _, err = fmt.Fprintf(output, "QoS error: %s\n", status.Traffic.Error); err != nil {
+		if _, err = fmt.Fprintf(output, "QoS error: %s\n", diagnostic.Text(status.Traffic.Error)); err != nil {
 			return err
 		}
 	}
 	if status.Network.Error != "" {
-		if _, err = fmt.Fprintf(output, "Network error: %s\n", status.Network.Error); err != nil {
+		if _, err = fmt.Fprintf(output, "Network error: %s\n", diagnostic.Text(status.Network.Error)); err != nil {
 			return err
 		}
 	}
