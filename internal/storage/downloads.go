@@ -101,6 +101,52 @@ func (store *Store) Downloads(ctx context.Context) ([]model.Download, error) {
 	return downloads, nil
 }
 
+func (store *Store) DownloadPage(
+	ctx context.Context,
+	cursor model.DownloadCursor,
+	limit int,
+) ([]model.Download, model.DownloadCursor, bool, error) {
+	if limit <= 0 {
+		return nil, model.DownloadCursor{}, false, fmt.Errorf("download page limit must be positive")
+	}
+	query := "SELECT " + downloadColumns + " FROM downloads"
+	arguments := make([]any, 0, 3)
+	if !cursor.CreatedAt.IsZero() {
+		query += " WHERE created_at > ? OR (created_at = ? AND id > ?)"
+		formatted := formatTime(cursor.CreatedAt)
+		arguments = append(arguments, formatted, formatted, cursor.ID.String())
+	}
+	query += " ORDER BY created_at, id LIMIT ?"
+	arguments = append(arguments, limit+1)
+	rows, err := store.database.QueryContext(ctx, query, arguments...)
+	if err != nil {
+		return nil, model.DownloadCursor{}, false, fmt.Errorf("list download page: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	downloads := make([]model.Download, 0, limit+1)
+	for rows.Next() {
+		download, err := scanDownload(rows)
+		if err != nil {
+			return nil, model.DownloadCursor{}, false, fmt.Errorf("scan download page: %w", err)
+		}
+		downloads = append(downloads, download)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, model.DownloadCursor{}, false, fmt.Errorf("iterate download page: %w", err)
+	}
+	more := len(downloads) > limit
+	if more {
+		downloads = downloads[:limit]
+	}
+	next := model.DownloadCursor{}
+	if more && len(downloads) > 0 {
+		last := downloads[len(downloads)-1]
+		next = model.DownloadCursor{CreatedAt: last.CreatedAt, ID: last.ID}
+	}
+
+	return downloads, next, more, nil
+}
+
 func (store *Store) DeleteDownload(ctx context.Context, id model.DownloadID) error {
 	result, err := store.database.ExecContext(ctx, "DELETE FROM downloads WHERE id = ?", id.String())
 	if err != nil {

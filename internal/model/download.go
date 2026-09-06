@@ -165,6 +165,11 @@ type DownloadChunk struct {
 	DownloadedBytes int64
 }
 
+type DownloadCursor struct {
+	CreatedAt time.Time
+	ID        DownloadID
+}
+
 func (chunk DownloadChunk) Size() int64 {
 	return chunk.End - chunk.Start + 1
 }
