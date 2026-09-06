@@ -35,6 +35,7 @@ type Tree struct {
 	IFBInterface             string
 	LinkRateBitsPerSecond    uint64
 	ArgoRateBitsPerSecond    uint64
+	ArgoCeilingBitsPerSecond uint64
 	ShapingRateBitsPerSecond uint64
 	DefaultRateBitsPerSecond uint64
 	Commands                 []Command
@@ -127,6 +128,30 @@ func NewWithRunners(runner Runner, linkRunner Runner) (*Backend, error) {
 }
 
 func GenerateTree(interfaceName string, linkRate, argoRate uint64) (Tree, error) {
+	return GenerateTreeWithArgoCeiling(interfaceName, linkRate, argoRate, linkRate)
+}
+
+func GenerateTreeForState(state qos.DesiredState) (Tree, error) {
+	if err := state.Validate(); err != nil {
+		return Tree{}, err
+	}
+	if !state.Enabled {
+		return Tree{}, fmt.Errorf("cannot generate tc tree for disabled QoS state")
+	}
+	ceiling := state.LinkRateBitsPerSecond
+	if state.Policy == qos.PolicyLatency {
+		ceiling = state.ArgoRateBitsPerSecond
+	}
+
+	return GenerateTreeWithArgoCeiling(
+		state.Interface,
+		state.LinkRateBitsPerSecond,
+		state.ArgoRateBitsPerSecond,
+		ceiling,
+	)
+}
+
+func GenerateTreeWithArgoCeiling(interfaceName string, linkRate, argoRate, argoCeiling uint64) (Tree, error) {
 	if err := qos.ValidateInterface(interfaceName); err != nil {
 		return Tree{}, err
 	}
@@ -136,8 +161,12 @@ func GenerateTree(interfaceName string, linkRate, argoRate uint64) (Tree, error)
 	if argoRate == 0 || argoRate >= linkRate {
 		return Tree{}, fmt.Errorf("argo rate must be positive and lower than link rate")
 	}
+	if argoCeiling < argoRate || argoCeiling > linkRate {
+		return Tree{}, fmt.Errorf("argo ceiling must be at least the Argo rate and at most the link rate")
+	}
 	shapingRate := applyHeadroom(linkRate)
 	shapingArgoRate := applyHeadroom(argoRate)
+	shapingArgoCeiling := applyHeadroom(argoCeiling)
 	defaultRate := shapingRate - shapingArgoRate
 	ifb := IFBInterface(interfaceName)
 	link := rate(shapingRate)
@@ -146,7 +175,7 @@ func GenerateTree(interfaceName string, linkRate, argoRate uint64) (Tree, error)
 	commands := []Command{
 		{Arguments: []string{"qdisc", "replace", "dev", ifb, "root", "handle", rootHandle, "htb", "default", "20"}},
 		{Arguments: []string{"class", "replace", "dev", ifb, "parent", rootHandle, "classid", rootClass, "htb", "rate", link, "ceil", link}},
-		{Arguments: []string{"class", "replace", "dev", ifb, "parent", rootClass, "classid", argoClass, "htb", "rate", argo, "ceil", link}},
+		{Arguments: []string{"class", "replace", "dev", ifb, "parent", rootClass, "classid", argoClass, "htb", "rate", argo, "ceil", rate(shapingArgoCeiling)}},
 		{Arguments: []string{"class", "replace", "dev", ifb, "parent", rootClass, "classid", defaultClass, "htb", "rate", other, "ceil", link}},
 		{Arguments: []string{"qdisc", "replace", "dev", ifb, "parent", argoClass, "handle", argoQdisc, "fq_codel"}},
 		{Arguments: []string{"qdisc", "replace", "dev", ifb, "parent", defaultClass, "handle", defaultQdisc, "fq_codel"}},
@@ -158,6 +187,7 @@ func GenerateTree(interfaceName string, linkRate, argoRate uint64) (Tree, error)
 		IFBInterface:             ifb,
 		LinkRateBitsPerSecond:    linkRate,
 		ArgoRateBitsPerSecond:    argoRate,
+		ArgoCeilingBitsPerSecond: argoCeiling,
 		ShapingRateBitsPerSecond: shapingRate,
 		DefaultRateBitsPerSecond: defaultRate,
 		Commands:                 commands,
@@ -165,7 +195,16 @@ func GenerateTree(interfaceName string, linkRate, argoRate uint64) (Tree, error)
 }
 
 func (backend *Backend) Apply(ctx context.Context, tree Tree) error {
-	canonical, err := GenerateTree(tree.Interface, tree.LinkRateBitsPerSecond, tree.ArgoRateBitsPerSecond)
+	ceiling := tree.ArgoCeilingBitsPerSecond
+	if ceiling == 0 {
+		ceiling = tree.LinkRateBitsPerSecond
+	}
+	canonical, err := GenerateTreeWithArgoCeiling(
+		tree.Interface,
+		tree.LinkRateBitsPerSecond,
+		tree.ArgoRateBitsPerSecond,
+		ceiling,
+	)
 	if err != nil {
 		return err
 	}

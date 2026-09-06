@@ -21,8 +21,9 @@ import (
 )
 
 const (
-	rxIPv4Address = "10.232.0.2:38081"
-	rxIPv6Address = "[2001:db8:232::2]:38081"
+	rxIPv4Address         = "10.232.0.2:38081"
+	rxIPv6Address         = "[2001:db8:232::2]:38081"
+	rxMeasurementDuration = 3 * time.Second
 )
 
 func TestQoSRxTrafficShare(t *testing.T) {
@@ -119,6 +120,27 @@ func testQoSRxTrafficShare(t *testing.T) {
 		if measurement[0] < measurement[1]*2 {
 			t.Fatalf("%s RX shaping did not prioritize Argo: Argo=%d other=%d", family, measurement[0], measurement[1])
 		}
+	}
+	adaptive, err := qos.MapAdaptivePolicy(qos.PolicyEnvironment{
+		Interface: "argo-rx-client", LinkRateBitsPerSecond: 20_000_000,
+		Cgroup: cgroup, ActiveDownloads: 1,
+	}, 4_000_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := backend.Apply(context.Background(), adaptive); err != nil {
+		t.Fatal(err)
+	}
+	limitedArgo, limitedOther := measureRxPair(t, rxIPv4Address, cgroup)
+	if limitedArgo >= ipv4Argo/2 {
+		t.Fatalf("adaptive ceiling did not reduce classified RX throughput: before=%d after=%d", ipv4Argo, limitedArgo)
+	}
+	if limitedArgo*2 >= limitedOther {
+		t.Fatalf("adaptive ceiling did not constrain Argo below competing traffic: Argo=%d other=%d", limitedArgo, limitedOther)
+	}
+	limitedBitsPerSecond := uint64(limitedArgo) * 8 / uint64(rxMeasurementDuration/time.Second)
+	if limitedBitsPerSecond > 6_000_000 {
+		t.Fatalf("4 Mbit/s adaptive ceiling allowed %d bit/s", limitedBitsPerSecond)
 	}
 	classes := runKernelCommand(t, "tc", "-s", "class", "show", "dev", tc.IFBInterface("argo-rx-client"))
 	if !strings.Contains(classes, "class htb a400:10") || !strings.Contains(classes, "class htb a400:20") {
@@ -244,7 +266,7 @@ func runRxClientWorker(t *testing.T, address string) {
 	defer func() {
 		_ = connection.Close()
 	}()
-	if err := connection.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+	if err := connection.SetReadDeadline(time.Now().Add(rxMeasurementDuration)); err != nil {
 		t.Fatal(err)
 	}
 	buffer := make([]byte, 64*1024)
