@@ -423,6 +423,83 @@ func TestTUILifecycleActionsRequireConfirmation(t *testing.T) {
 	}
 }
 
+func TestTUIConfirmationNeverTargetsReplacementRow(t *testing.T) {
+	for _, key := range []rune{'c', 'x'} {
+		t.Run(string(key), func(t *testing.T) {
+			status := "downloading"
+			if key == 'x' {
+				status = "completed"
+			}
+			client := &tuiStatusClient{
+				status: ipc.Status{State: "running"},
+				downloads: [][]ipc.Download{
+					{{ID: "original", Status: status}, {ID: "replacement", Status: status}},
+					{{ID: "replacement", Status: status}},
+				},
+			}
+			model := loadTUIModel(t, client)
+			updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{key}})
+			model = updated.(tui.Model)
+			updated, _ = model.Update(model.Init()())
+			model = updated.(tui.Model)
+			if !strings.Contains(model.View(), "confirmation canceled") {
+				t.Fatalf("removed confirmation target remained active: %q", model.View())
+			}
+			_, command := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+			if command == nil {
+				t.Fatal("invalid confirmation did not return an actionable result")
+			}
+			_ = command()
+			if len(client.actions) != 0 {
+				t.Fatalf("replacement row received actions: %v", client.actions)
+			}
+		})
+	}
+}
+
+func TestTUIConfirmationAndSelectionFollowIdentityAcrossReorder(t *testing.T) {
+	client := &tuiStatusClient{
+		status: ipc.Status{State: "running"},
+		downloads: [][]ipc.Download{
+			{{ID: "original", Filename: "original.bin", Status: "downloading"}, {ID: "other", Filename: "other.bin", Status: "downloading"}},
+			{{ID: "other", Filename: "other.bin", Status: "downloading"}, {ID: "original", Filename: "original.bin", Status: "downloading"}},
+		},
+	}
+	model := loadTUIModel(t, client)
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	model = updated.(tui.Model)
+	updated, _ = model.Update(model.Init()())
+	model = updated.(tui.Model)
+	if !strings.Contains(model.View(), "Cancel original? y/N") || !strings.Contains(model.View(), "> original.bin") {
+		t.Fatalf("confirmation or selection did not follow identity: %q", model.View())
+	}
+	_, command := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	if command == nil {
+		t.Fatal("stable confirmation did not dispatch")
+	}
+	_ = command()
+	if strings.Join(client.actions, ",") != "cancel:original" {
+		t.Fatalf("confirmation targeted %v", client.actions)
+	}
+}
+
+func TestTUIConfirmationIsCanceledAfterIncompatibleCompletion(t *testing.T) {
+	client := &tuiStatusClient{
+		status: ipc.Status{State: "running"},
+		downloads: [][]ipc.Download{
+			{{ID: "original", Status: "downloading"}},
+			{{ID: "original", Status: "completed"}},
+		},
+	}
+	model := loadTUIModel(t, client)
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	updated, _ = updated.(tui.Model).Update(model.Init()())
+	model = updated.(tui.Model)
+	if !strings.Contains(model.View(), "confirmation canceled") || strings.Contains(model.View(), "Cancel original? y/N") {
+		t.Fatalf("completed target retained cancel confirmation: %q", model.View())
+	}
+}
+
 func TestTUIHelpViewAndResponsiveViewport(t *testing.T) {
 	downloads := make([]ipc.Download, 12)
 	for index := range downloads {
