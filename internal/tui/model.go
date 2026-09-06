@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/kristyancarvalho/argo/internal/console"
 	"github.com/kristyancarvalho/argo/internal/diagnostic"
 	"github.com/kristyancarvalho/argo/internal/ipc"
@@ -248,12 +248,15 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 func (model Model) View() string {
 	var view strings.Builder
 	width := model.viewWidth()
+	if model.height > 0 && model.height < 18 {
+		return model.compactView(width)
+	}
 	title := console.Paint(model.color, console.Cyan, console.Paint(model.color, console.Bold, "Argo"))
 	daemon := "Daemon: " + statusValue(model.status.State)
 	if !model.ready {
 		daemon = "Daemon: connecting"
 	}
-	spaces := max(1, width-4-utf8.RuneCountInString(daemon))
+	spaces := max(1, width-4-ansi.StringWidth(daemon))
 	view.WriteString(title)
 	view.WriteString(strings.Repeat(" ", spaces))
 	view.WriteString(console.Paint(model.color, statusColor(model.status.State), daemon))
@@ -262,7 +265,7 @@ func (model Model) View() string {
 	view.WriteByte('\n')
 	if model.help {
 		model.renderHelp(&view)
-		return view.String()
+		return model.boundView(view.String())
 	}
 	switch {
 	case !model.ready:
@@ -288,7 +291,7 @@ func (model Model) View() string {
 		view.WriteString(console.Paint(model.color, console.Cyan, label))
 		view.WriteString(diagnostic.Display(model.input))
 		view.WriteString("\nEnter submit  Esc cancel\n")
-		return view.String()
+		return model.boundView(view.String())
 	}
 	if model.mode == inputModeClear ||
 		((model.mode == inputModeCancel || model.mode == inputModeRemove) && model.confirmID != "") {
@@ -300,11 +303,11 @@ func (model Model) View() string {
 			prompt = fmt.Sprintf("Remove %s from history? y/N", diagnostic.Display(model.confirmID))
 		}
 		view.WriteString(console.Paint(model.color, console.Yellow, "\n"+prompt+"\n"))
-		return view.String()
+		return model.boundView(view.String())
 	}
 	if model.mode == inputModePolicy {
 		view.WriteString(console.Paint(model.color, console.Cyan, "\nSelect traffic policy: 1 off  2 balanced  3 throughput  4 latency  5 focus  Esc cancel\n"))
-		return view.String()
+		return model.boundView(view.String())
 	}
 	if model.actionErr != nil {
 		view.WriteString(console.Paint(model.color, console.Red, "\nAction failed: "+diagnostic.Display(diagnostic.Text(model.actionErr.Error()))))
@@ -314,16 +317,125 @@ func (model Model) View() string {
 		view.WriteString(console.Paint(model.color, console.Green, diagnostic.Display(model.notice)))
 		view.WriteByte('\n')
 	}
-	if width < 72 {
-		view.WriteString(console.Paint(model.color, console.Dim, "\nup/down select  a add\n"))
-		view.WriteString(console.Paint(model.color, console.Dim, "p pause  r resume  R retry\n"))
-		view.WriteString(console.Paint(model.color, console.Dim, "c cancel  x remove  C clear\n"))
-		view.WriteString(console.Paint(model.color, console.Dim, "? help  q quit\n"))
+	if width < 96 {
+		view.WriteString(console.Paint(model.color, console.Dim, "\na add  p pause  r resume\n"))
+		view.WriteString(console.Paint(model.color, console.Dim, "R retry  c cancel  x remove\n"))
+		view.WriteString(console.Paint(model.color, console.Dim, "C clear  ? help  q quit\n"))
 	} else {
 		view.WriteString(console.Paint(model.color, console.Dim, "\nup/down select  a add  p pause  r resume  R retry  c cancel  x remove  C clear  ? help  q quit\n"))
 	}
 
-	return view.String()
+	return model.boundView(view.String())
+}
+
+func (model Model) compactView(width int) string {
+	lines := make([]string, 0, max(model.height, 1))
+	daemon := statusValue(model.status.State)
+	if !model.ready {
+		daemon = "connecting"
+	}
+	lines = append(lines, console.Paint(model.color, console.Cyan, "Argo")+"  daemon: "+daemon)
+	if model.help {
+		lines = append(lines,
+			"Help",
+			"up/down or k/j  select",
+			"a add  p pause  r resume",
+			"R retry  c cancel",
+			"x remove  C clear",
+			"1/2/3 priority",
+			"t policy  f profile",
+			"? or Esc close",
+			"q quit",
+		)
+		return model.boundView(strings.Join(lines, "\n") + "\n")
+	}
+	if !model.ready {
+		lines = append(lines, "Connecting to daemon...", "? help  q quit")
+		return model.boundView(strings.Join(lines, "\n") + "\n")
+	}
+	if model.err != nil {
+		lines = append(lines, "Daemon unavailable: "+diagnostic.Display(diagnostic.Text(model.err.Error())), "? help  q quit")
+		return model.boundView(strings.Join(lines, "\n") + "\n")
+	}
+	networkState := model.status.Network.State
+	if !model.status.Network.Available {
+		networkState = "unavailable"
+	} else if !model.status.Network.Connected {
+		networkState = "disconnected"
+	} else if networkState == "" {
+		networkState = "connected"
+	}
+	lines = append(lines,
+		fmt.Sprintf("net: %s  policy: %s", diagnostic.Display(networkState), statusValue(model.status.Traffic.Policy)),
+		"Downloads",
+	)
+	start, end := model.visibleBounds()
+	if len(model.downloads) == 0 {
+		lines = append(lines, "  No downloads.")
+	} else {
+		for index := start; index < end; index++ {
+			download := model.downloads[index]
+			marker := " "
+			if index == model.selected {
+				marker = ">"
+			}
+			filename := truncateCells(diagnostic.Display(download.Filename), max(1, width-ansi.StringWidth(download.Status)-4))
+			line := fmt.Sprintf("%s %s  %s", marker, filename, diagnostic.Display(download.Status))
+			lines = append(lines, console.Paint(model.color, statusColor(download.Status), line))
+		}
+	}
+	contextLine := ""
+	switch model.mode {
+	case inputModeAdd:
+		contextLine = "Add URL: " + diagnostic.Display(model.input)
+	case inputModeProfile:
+		contextLine = "Profile: " + diagnostic.Display(model.input)
+	case inputModePolicy:
+		contextLine = "Policy: 1 off 2 balanced 3 throughput 4 latency 5 focus"
+	case inputModeClear:
+		contextLine = "Clear history? y/N"
+	case inputModeCancel:
+		if model.confirmID != "" {
+			contextLine = "Cancel " + diagnostic.Display(model.confirmID) + "? y/N"
+		}
+	case inputModeRemove:
+		if model.confirmID != "" {
+			contextLine = "Remove " + diagnostic.Display(model.confirmID) + "? y/N"
+		}
+	case inputModeNone:
+	}
+	if contextLine == "" && model.actionErr != nil {
+		contextLine = "Failed: " + diagnostic.Display(diagnostic.Text(model.actionErr.Error()))
+	}
+	if contextLine == "" && model.notice != "" {
+		contextLine = diagnostic.Display(model.notice)
+	}
+	if contextLine == "" && model.hasSelection() {
+		download := model.downloads[model.selected]
+		contextLine = shortID(download.ID) + "  " + diagnostic.Display(download.Priority)
+	}
+	lines = append(lines, contextLine, "a add  ? help  q quit")
+
+	return model.boundView(strings.Join(lines, "\n") + "\n")
+}
+
+func (model Model) boundView(value string) string {
+	width := model.viewWidth()
+	logical := strings.Split(strings.TrimSuffix(value, "\n"), "\n")
+	lines := make([]string, 0, len(logical))
+	for _, line := range logical {
+		lines = append(lines, ansi.Truncate(line, width, "…"))
+	}
+	if model.height > 0 && len(lines) > model.height {
+		if model.height == 1 {
+			lines = lines[len(lines)-1:]
+		} else {
+			last := lines[len(lines)-1]
+			lines = append(lines[:model.height-1], last)
+		}
+	}
+
+	return strings.Join(lines, "\n") + "\n"
 }
 
 func (model Model) renderDownloads(view *strings.Builder, width int) {
@@ -343,15 +455,15 @@ func (model Model) renderDownloads(view *strings.Builder, width int) {
 		}
 		speed := model.speeds[download.ID]
 		var row string
-		if width < 72 {
-			filename := truncateRunes(diagnostic.Display(download.Filename), max(12, width-4))
+		if width < 96 {
+			filename := truncateCells(diagnostic.Display(download.Filename), max(4, width-4))
 			row = fmt.Sprintf("%s %s\n  %s  %s  %s\n  %s  ETA %s  %s\n",
 				marker, filename, shortID(download.ID), diagnostic.Display(download.Status), formatTUIProgress(download),
 				formatTUISpeed(speed), model.formatTUIETA(download), diagnostic.Display(download.Priority))
 		} else {
 			filenameWidth := max(14, width-65)
-			row = fmt.Sprintf("%s %-*s %12s %10s %8s %-11s %-6s %s\n",
-				marker, filenameWidth, truncateRunes(diagnostic.Display(download.Filename), filenameWidth),
+			row = fmt.Sprintf("%s %s %12s %10s %8s %-11s %-6s %s\n",
+				marker, padCells(diagnostic.Display(download.Filename), filenameWidth),
 				formatTUIProgress(download), formatTUISpeed(speed), model.formatTUIETA(download),
 				diagnostic.Display(download.Status), diagnostic.Display(download.Priority), shortID(download.ID))
 		}
@@ -376,12 +488,12 @@ func (model Model) renderSelected(view *strings.Builder, width int) {
 	view.WriteByte('\n')
 	if model.height > 0 && model.height < 22 {
 		_, _ = fmt.Fprintf(view, "  %s  %s  %s\n", shortID(download.ID), diagnostic.Display(download.Status), diagnostic.Display(download.Priority))
-		_, _ = fmt.Fprintf(view, "  %s\n", truncateRunes(diagnostic.Display(download.Filename), max(8, width-4)))
+		_, _ = fmt.Fprintf(view, "  %s\n", truncateCells(diagnostic.Display(download.Filename), max(4, width-4)))
 		return
 	}
 	_, _ = fmt.Fprintf(view, "  ID: %s\n  State: %s    Priority: %s\n", diagnostic.Display(download.ID), diagnostic.Display(download.Status), diagnostic.Display(download.Priority))
-	_, _ = fmt.Fprintf(view, "  File: %s\n", truncateRunes(diagnostic.Display(download.Filename), max(8, width-8)))
-	_, _ = fmt.Fprintf(view, "  Source: %s\n", truncateRunes(diagnostic.Display(diagnostic.URL(download.URL)), max(8, width-10)))
+	_, _ = fmt.Fprintf(view, "  File: %s\n", truncateCells(diagnostic.Display(download.Filename), max(4, width-8)))
+	_, _ = fmt.Fprintf(view, "  Source: %s\n", truncateCells(diagnostic.Display(diagnostic.URL(download.URL)), max(4, width-10)))
 }
 
 func (model Model) renderHelp(view *strings.Builder) {
@@ -407,8 +519,8 @@ func (model Model) renderNetworkAndQoS(view *strings.Builder) {
 	} else if networkState == "" {
 		networkState = "connected"
 	}
-	if model.height > 0 && model.height < 22 {
-		_, _ = fmt.Fprintf(view, "Network: %s  Interface: %s\n", networkState, statusValue(model.status.Network.Interface))
+	if model.viewWidth() < 96 || model.height > 0 && model.height < 22 {
+		_, _ = fmt.Fprintf(view, "Network: %s  Interface: %s\n", diagnostic.Display(networkState), statusValue(model.status.Network.Interface))
 		_, _ = fmt.Fprintf(view, "Profile: %s  Traffic policy: %s\n", statusValue(model.status.ActiveProfile), statusValue(model.status.Traffic.Policy))
 		if model.status.Traffic.Error != "" {
 			view.WriteString(console.Paint(model.color, console.Red, "QoS error: "+diagnostic.Display(diagnostic.Text(model.status.Traffic.Error))))
@@ -420,29 +532,16 @@ func (model Model) renderNetworkAndQoS(view *strings.Builder) {
 		}
 		return
 	}
-	if model.viewWidth() < 72 {
-		_, _ = fmt.Fprintf(
-			view,
-			"Network: %s\nInterface: %s    Metered: %s\nProfile: %s\nTraffic policy: %s\nArgo throughput: %s\n",
-			diagnostic.Display(networkState),
-			statusValue(model.status.Network.Interface),
-			statusValue(model.status.Network.Metered),
-			statusValue(model.status.ActiveProfile),
-			statusValue(model.status.Traffic.Policy),
-			formatTUISpeed(model.totalSpeed()),
-		)
-	} else {
-		_, _ = fmt.Fprintf(
-			view,
-			"Network: %s  Interface: %s  Metered: %s\nProfile: %s  Traffic policy: %s  Argo throughput: %s\n",
-			diagnostic.Display(networkState),
-			statusValue(model.status.Network.Interface),
-			statusValue(model.status.Network.Metered),
-			statusValue(model.status.ActiveProfile),
-			statusValue(model.status.Traffic.Policy),
-			formatTUISpeed(model.totalSpeed()),
-		)
-	}
+	_, _ = fmt.Fprintf(
+		view,
+		"Network: %s  Interface: %s  Metered: %s\nProfile: %s  Traffic policy: %s  Argo throughput: %s\n",
+		diagnostic.Display(networkState),
+		statusValue(model.status.Network.Interface),
+		statusValue(model.status.Network.Metered),
+		statusValue(model.status.ActiveProfile),
+		statusValue(model.status.Traffic.Policy),
+		formatTUISpeed(model.totalSpeed()),
+	)
 	if model.status.Traffic.CurrentRateBitsPerSecond > 0 {
 		_, _ = fmt.Fprintf(view, "Adaptive limit: %d bit/s\n", model.status.Traffic.CurrentRateBitsPerSecond)
 	} else {
@@ -772,7 +871,7 @@ func (model Model) viewWidth() int {
 		return 100
 	}
 
-	return max(32, model.width)
+	return max(1, model.width)
 }
 
 func (model Model) listCapacity() int {
@@ -780,9 +879,12 @@ func (model Model) listCapacity() int {
 	if height <= 0 {
 		height = 30
 	}
-	capacity := max(1, height-17)
-	if model.viewWidth() < 72 {
-		capacity = max(1, capacity/3)
+	if height < 18 {
+		return max(1, height-5)
+	}
+	capacity := max(1, height-18)
+	if model.viewWidth() < 96 {
+		capacity = max(1, (height-20)/3)
 	}
 
 	return min(8, capacity)
@@ -831,22 +933,21 @@ func statusColor(status string) console.Code {
 
 func shortID(value string) string {
 	value = diagnostic.Display(value)
-	return truncateRunes(value, 8)
+	return truncateCells(value, 8)
 }
 
-func truncateRunes(value string, maximum int) string {
+func truncateCells(value string, maximum int) string {
 	if maximum <= 0 {
 		return ""
 	}
-	if utf8.RuneCountInString(value) <= maximum {
-		return value
-	}
-	runes := []rune(value)
-	if maximum <= 3 {
-		return string(runes[:maximum])
-	}
 
-	return string(runes[:maximum-1]) + "…"
+	return ansi.Truncate(value, maximum, "…")
+}
+
+func padCells(value string, width int) string {
+	value = truncateCells(value, width)
+
+	return value + strings.Repeat(" ", max(0, width-ansi.StringWidth(value)))
 }
 
 func formatTUIProgress(download ipc.Download) string {
