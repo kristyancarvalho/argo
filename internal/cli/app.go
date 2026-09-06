@@ -359,6 +359,11 @@ func runStatus(ctx context.Context, client Client, output io.Writer, arguments [
 			return err
 		}
 	}
+	if status.Network.Error != "" {
+		if _, err = fmt.Fprintf(output, "Network error: %s\n", status.Network.Error); err != nil {
+			return err
+		}
+	}
 	if status.Traffic.CurrentRateBitsPerSecond > 0 {
 		if _, err = fmt.Fprintf(
 			output,

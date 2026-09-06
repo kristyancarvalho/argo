@@ -37,6 +37,7 @@ type NetworkStatus struct {
 	ConnectionType   string `json:"connection_type"`
 	Interface        string `json:"interface"`
 	Metered          string `json:"metered"`
+	Error            string `json:"error"`
 }
 
 type Handler interface {

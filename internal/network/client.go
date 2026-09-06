@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sync"
 
 	"github.com/godbus/dbus/v5"
 )
@@ -65,9 +66,12 @@ type PropertyReader interface {
 }
 
 type Client struct {
+	mutex      sync.RWMutex
 	properties PropertyReader
 	events     EventSubscriber
 	closer     io.Closer
+	connector  func() (PropertyReader, EventSubscriber, io.Closer, error)
+	closed     bool
 }
 
 type systemPropertyReader struct {
@@ -75,16 +79,22 @@ type systemPropertyReader struct {
 }
 
 func ConnectSystem() (*Client, error) {
-	connection, err := dbus.ConnectSystemBus()
-	if err != nil {
-		return nil, fmt.Errorf("connect to system D-Bus: %w", err)
+	client := &Client{connector: connectSystemResources}
+	if err := client.Reconnect(context.Background()); err != nil {
+		return nil, err
 	}
 
-	return &Client{
-		properties: &systemPropertyReader{connection: connection},
-		events:     &systemEventSubscriber{connection: connection},
-		closer:     connection,
-	}, nil
+	return client, nil
+}
+
+func connectSystemResources() (PropertyReader, EventSubscriber, io.Closer, error) {
+	connection, err := dbus.ConnectSystemBus()
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("connect to system D-Bus: %w", err)
+	}
+
+	return &systemPropertyReader{connection: connection},
+		&systemEventSubscriber{connection: connection}, connection, nil
 }
 
 func NewClient(properties PropertyReader) *Client {
@@ -96,6 +106,12 @@ func NewObservableClient(properties PropertyReader, events EventSubscriber) *Cli
 }
 
 func (client *Client) Close() error {
+	client.mutex.Lock()
+	defer client.mutex.Unlock()
+	if client.closed {
+		return nil
+	}
+	client.closed = true
 	if client.closer == nil {
 		return nil
 	}
@@ -103,7 +119,45 @@ func (client *Client) Close() error {
 	return client.closer.Close()
 }
 
+func (client *Client) Reconnect(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	client.mutex.RLock()
+	connector := client.connector
+	closed := client.closed
+	client.mutex.RUnlock()
+	if closed {
+		return fmt.Errorf("network client is closed")
+	}
+	if connector == nil {
+		return fmt.Errorf("network client cannot reconnect")
+	}
+	properties, events, closer, err := connector()
+	if err != nil {
+		return err
+	}
+	client.mutex.Lock()
+	if client.closed {
+		client.mutex.Unlock()
+		_ = closer.Close()
+		return fmt.Errorf("network client is closed")
+	}
+	previous := client.closer
+	client.properties = properties
+	client.events = events
+	client.closer = closer
+	client.mutex.Unlock()
+	if previous != nil {
+		_ = previous.Close()
+	}
+
+	return nil
+}
+
 func (client *Client) ReadState(ctx context.Context) (Snapshot, error) {
+	client.mutex.RLock()
+	defer client.mutex.RUnlock()
 	stateValue, err := client.readManagerProperty(ctx, "State")
 	if err != nil {
 		return Snapshot{}, err

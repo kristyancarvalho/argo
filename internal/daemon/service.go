@@ -60,6 +60,10 @@ type NetworkObserver interface {
 	Observe(context.Context, func(network.Snapshot) error) error
 }
 
+type NetworkReconnector interface {
+	Reconnect(context.Context) error
+}
+
 type TelemetryObserver interface {
 	Observe(context.Context, func(telemetry.Snapshot) error) error
 }
@@ -126,6 +130,7 @@ type Service struct {
 	networkMutex       sync.RWMutex
 	networkSnapshot    network.Snapshot
 	networkAvailable   bool
+	networkError       string
 	pauseOnMetered     bool
 	resumeAfterMetered bool
 	meteredMutex       sync.Mutex
@@ -342,6 +347,7 @@ func (service *Service) statusResponse() ipc.Status {
 	service.networkMutex.RLock()
 	snapshot := service.networkSnapshot
 	available := service.networkAvailable
+	networkError := service.networkError
 	service.networkMutex.RUnlock()
 	status.Network = ipc.NetworkStatus{
 		Available:        available,
@@ -352,6 +358,7 @@ func (service *Service) statusResponse() ipc.Status {
 		ConnectionType:   snapshot.ConnectionType,
 		Interface:        snapshot.Interface,
 		Metered:          string(snapshot.Metered),
+		Error:            networkError,
 	}
 	service.profileMutex.RLock()
 	status.ActiveProfile = service.activeProfile

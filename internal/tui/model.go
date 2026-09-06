@@ -390,6 +390,10 @@ func (model Model) renderNetworkAndQoS(view *strings.Builder) {
 			view.WriteString(console.Paint(model.color, console.Red, "QoS error: "+model.status.Traffic.Error))
 			view.WriteByte('\n')
 		}
+		if model.status.Network.Error != "" {
+			view.WriteString(console.Paint(model.color, console.Red, "Network error: "+model.status.Network.Error))
+			view.WriteByte('\n')
+		}
 		return
 	}
 	if model.viewWidth() < 72 {
@@ -422,6 +426,10 @@ func (model Model) renderNetworkAndQoS(view *strings.Builder) {
 	}
 	if model.status.Traffic.Error != "" {
 		view.WriteString(console.Paint(model.color, console.Red, "QoS error: "+model.status.Traffic.Error))
+		view.WriteByte('\n')
+	}
+	if model.status.Network.Error != "" {
+		view.WriteString(console.Paint(model.color, console.Red, "Network error: "+model.status.Network.Error))
 		view.WriteByte('\n')
 	}
 	if model.status.Traffic.LatencyAvailable {
