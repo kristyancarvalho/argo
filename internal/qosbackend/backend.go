@@ -27,11 +27,7 @@ func (backend *Backend) Apply(ctx context.Context, state qos.DesiredState) error
 	if err != nil {
 		return err
 	}
-	tree, err := tc.GenerateTree(
-		state.Interface,
-		state.LinkRateBitsPerSecond,
-		state.ArgoRateBitsPerSecond,
-	)
+	tree, err := tc.GenerateTreeForState(state)
 	if err != nil {
 		return err
 	}

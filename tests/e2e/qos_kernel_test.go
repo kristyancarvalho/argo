@@ -122,6 +122,21 @@ func testQoSKernelLifecycle(t *testing.T) {
 			}
 		}
 	}
+	adaptive, err := qos.MapAdaptivePolicy(qos.PolicyEnvironment{
+		Interface: "argo-test", LinkRateBitsPerSecond: 100_000_000,
+		Cgroup: cgroup, ActiveDownloads: 1,
+	}, 20_000_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := controller.Reconcile(context.Background(), adaptive); err != nil {
+		t.Fatalf("apply adaptive policy: %v", err)
+	}
+	classes := runKernelCommand(t, "tc", "class", "show", "dev", tc.IFBInterface("argo-test"))
+	if !strings.Contains(classes, "class htb a400:10") ||
+		!strings.Contains(classes, "rate 19Mbit ceil 19Mbit") {
+		t.Fatalf("adaptive class does not enforce its rate as a ceiling: %s", classes)
+	}
 	if _, err := signal.Write([]byte{1}); err != nil {
 		t.Fatal(err)
 	}

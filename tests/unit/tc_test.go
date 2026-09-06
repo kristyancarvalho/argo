@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kristyancarvalho/argo/internal/qos"
 	"github.com/kristyancarvalho/argo/internal/qos/tc"
 )
 
@@ -38,10 +39,50 @@ func TestTcDesiredTreeGeneration(t *testing.T) {
 	}
 }
 
+func TestTcAdaptiveTreeEnforcesArgoCeiling(t *testing.T) {
+	state := qos.DesiredState{
+		Enabled:               true,
+		Policy:                qos.PolicyLatency,
+		Interface:             "eth0",
+		LinkRateBitsPerSecond: 100_000_000,
+		ArgoRateBitsPerSecond: 20_000_000,
+		Cgroup:                qos.CgroupSelector{Path: "user.slice/argo.scope", Level: 2},
+	}
+	tree, err := tc.GenerateTreeForState(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tree.ArgoCeilingBitsPerSecond != 20_000_000 {
+		t.Fatalf("adaptive Argo ceiling is %d", tree.ArgoCeilingBitsPerSecond)
+	}
+	commands := make([]string, 0, len(tree.Commands))
+	for _, command := range tree.Commands {
+		commands = append(commands, strings.Join(command.Arguments, " "))
+	}
+	joined := strings.Join(commands, "\n")
+	if !strings.Contains(joined, "classid a400:10 htb rate 19000000bit ceil 19000000bit") {
+		t.Fatalf("adaptive tree does not enforce its reported limit: %s", joined)
+	}
+
+	state.Policy = qos.PolicyThroughput
+	staticTree, err := tc.GenerateTreeForState(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if staticTree.ArgoCeilingBitsPerSecond != 100_000_000 {
+		t.Fatalf("static policy lost borrowing ceiling: %+v", staticTree)
+	}
+}
+
 func TestTcRejectsInvalidBandwidthAndMissingExecutable(t *testing.T) {
 	for _, rates := range [][2]uint64{{0, 1}, {100, 0}, {100, 100}, {100, 101}} {
 		if _, err := tc.GenerateTree("eth0", rates[0], rates[1]); err == nil {
 			t.Fatalf("invalid rates succeeded: %v", rates)
+		}
+	}
+	for _, ceiling := range []uint64{49, 101} {
+		if _, err := tc.GenerateTreeWithArgoCeiling("eth0", 100, 50, ceiling); err == nil {
+			t.Fatalf("invalid Argo ceiling %d succeeded", ceiling)
 		}
 	}
 	if _, err := tc.GenerateTree("eth 0", 100, 50); err == nil {
