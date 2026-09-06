@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +19,8 @@ type blockingIPCHandler struct {
 	started  chan struct{}
 	finished chan struct{}
 }
+
+type oversizedIPCHandler struct{}
 
 func TestIPCSocketStartupAndStatus(t *testing.T) {
 	server, cancel, finished := startIPCServer(t)
@@ -175,6 +179,20 @@ func TestIPCRejectsOversizedMessageAndLimitsConcurrentConnections(t *testing.T) 
 	}
 }
 
+func TestIPCReportsOversizedResponsePrecisely(t *testing.T) {
+	server, cancel, finished := startIPCServerWithHandler(t, oversizedIPCHandler{})
+	defer stopIPCServer(t, server, cancel, finished)
+	var response string
+	err := ipc.NewClient(server.SocketPath()).Call(context.Background(), ipc.OperationStatus, nil, &response)
+	var remote ipc.RemoteError
+	if !errors.As(err, &remote) {
+		t.Fatalf("oversized response returned %T: %v", err, err)
+	}
+	if remote.Code != "response_too_large" {
+		t.Fatalf("oversized response returned code %q", remote.Code)
+	}
+}
+
 func TestIPCShutdownCancelsBlockedRequest(t *testing.T) {
 	handler := &blockingIPCHandler{started: make(chan struct{}), finished: make(chan struct{})}
 	server, cancel, finished := startIPCServerWithHandler(t, handler)
@@ -282,6 +300,10 @@ func (handler *blockingIPCHandler) Handle(ctx context.Context, request ipc.Reque
 	}
 
 	return nil, ctx.Err()
+}
+
+func (oversizedIPCHandler) Handle(context.Context, ipc.Request) (any, error) {
+	return strings.Repeat("x", 2<<20), nil
 }
 
 func stopIPCServer(t *testing.T, server *ipc.Server, cancel context.CancelFunc, finished <-chan error) {

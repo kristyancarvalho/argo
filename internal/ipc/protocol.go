@@ -125,7 +125,13 @@ type Download struct {
 }
 
 type ListResponse struct {
-	Downloads []Download `json:"downloads"`
+	Downloads  []Download `json:"downloads"`
+	NextCursor string     `json:"next_cursor,omitempty"`
+}
+
+type ListRequest struct {
+	Cursor string `json:"cursor,omitempty"`
+	Limit  int    `json:"limit,omitempty"`
 }
 
 type RemoteError struct {

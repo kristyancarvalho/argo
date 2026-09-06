@@ -2,6 +2,7 @@ package integration_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -73,15 +74,16 @@ func TestDaemonRedactsExistingHistoryAtIPCBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer closeSchedulerService(t, service)
-	result, err := service.Handle(context.Background(), ipc.Request{Operation: ipc.OperationList})
+	payload, err := json.Marshal(ipc.ShowRequest{ID: identifier.String()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	response := result.(ipc.ListResponse)
-	if len(response.Downloads) != 1 {
-		t.Fatalf("history response has %d entries", len(response.Downloads))
+	result, err := service.Handle(context.Background(), ipc.Request{Operation: ipc.OperationShow, Payload: payload})
+	if err != nil {
+		t.Fatal(err)
 	}
-	encoded := response.Downloads[0].URL + " " + response.Downloads[0].Error
+	response := result.(ipc.Download)
+	encoded := response.URL + " " + response.Error
 	if strings.Contains(encoded, "history-password") || strings.Contains(encoded, "history-token") ||
 		!strings.Contains(encoded, "https://redacted@example.test/file?redacted") {
 		t.Fatalf("IPC history exposed secrets: %q", encoded)

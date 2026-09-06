@@ -268,7 +268,25 @@ func (server *Server) writeError(connection net.Conn, id, code, message string) 
 }
 
 func (server *Server) writeResponse(connection net.Conn, response Response) {
-	_ = json.NewEncoder(connection).Encode(response)
+	encoded, err := json.Marshal(response)
+	if err != nil {
+		return
+	}
+	if len(encoded)+1 > maximumMessageSize {
+		encoded, err = json.Marshal(Response{
+			Version: ProtocolVersion,
+			ID:      response.ID,
+			OK:      false,
+			Error: &ResponseError{
+				Code: "response_too_large", Message: "response exceeds maximum message size",
+			},
+		})
+		if err != nil {
+			return
+		}
+	}
+	encoded = append(encoded, '\n')
+	_, _ = connection.Write(encoded)
 }
 
 func removeStaleSocket(socketPath string) error {

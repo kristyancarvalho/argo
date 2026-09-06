@@ -91,12 +91,27 @@ func (client *Client) Priority(ctx context.Context, id, priority string) (Priori
 }
 
 func (client *Client) List(ctx context.Context) ([]Download, error) {
-	var response ListResponse
-	if err := client.Call(ctx, OperationList, nil, &response); err != nil {
-		return nil, err
+	downloads := make([]Download, 0)
+	cursor := ""
+	seen := make(map[string]struct{})
+	for {
+		var response ListResponse
+		if err := client.Call(ctx, OperationList, ListRequest{Cursor: cursor}, &response); err != nil {
+			return nil, err
+		}
+		downloads = append(downloads, response.Downloads...)
+		if response.NextCursor == "" {
+			return downloads, nil
+		}
+		if response.NextCursor == cursor {
+			return nil, fmt.Errorf("daemon returned a repeated download cursor")
+		}
+		if _, exists := seen[response.NextCursor]; exists {
+			return nil, fmt.Errorf("daemon returned a cyclic download cursor")
+		}
+		seen[response.NextCursor] = struct{}{}
+		cursor = response.NextCursor
 	}
-
-	return response.Downloads, nil
 }
 
 func (client *Client) Show(ctx context.Context, id string) (Download, error) {

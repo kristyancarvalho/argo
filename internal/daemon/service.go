@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,12 +26,19 @@ import (
 
 const DefaultMaximumConcurrentDownloads = 3
 
+const (
+	defaultListPageSize    = 100
+	maximumListPageSize    = 200
+	maximumSummaryFilename = 1024
+)
+
 type Store interface {
 	CreateDownload(context.Context, model.Download) error
 	DeleteDownload(context.Context, model.DownloadID) error
 	ClearDownloadHistory(context.Context) ([]model.Download, error)
 	Download(context.Context, model.DownloadID) (model.Download, error)
 	Downloads(context.Context) ([]model.Download, error)
+	DownloadPage(context.Context, model.DownloadCursor, int) ([]model.Download, model.DownloadCursor, bool, error)
 	RecoverActiveDownloads(context.Context, time.Time) error
 	UpdateDownloadPriority(context.Context, model.DownloadID, model.Priority, time.Time) error
 	UpdateDownloadStatus(context.Context, model.DownloadID, model.Status, time.Time, string) error
@@ -325,7 +333,7 @@ func (service *Service) Handle(ctx context.Context, request ipc.Request) (any, e
 	case ipc.OperationPriority:
 		return service.setPriority(ctx, request.Payload)
 	case ipc.OperationList:
-		return service.list(ctx)
+		return service.list(ctx, request.Payload)
 	case ipc.OperationShow:
 		return service.show(ctx, request.Payload)
 	case ipc.OperationProfile:
@@ -722,17 +730,74 @@ func (service *Service) retry(ctx context.Context, payload json.RawMessage) (ipc
 	return service.queueDownload(ctx, download)
 }
 
-func (service *Service) list(ctx context.Context) (ipc.ListResponse, error) {
-	downloads, err := service.store.Downloads(ctx)
+func (service *Service) list(ctx context.Context, payload json.RawMessage) (ipc.ListResponse, error) {
+	request := ipc.ListRequest{}
+	if len(payload) > 0 {
+		if err := decodePayload(payload, &request); err != nil {
+			return ipc.ListResponse{}, InvalidDownloadActionError{Action: "list", Reason: err.Error()}
+		}
+	}
+	if request.Limit == 0 {
+		request.Limit = defaultListPageSize
+	}
+	if request.Limit < 1 || request.Limit > maximumListPageSize {
+		return ipc.ListResponse{}, InvalidDownloadActionError{Action: "list", Reason: "limit must be between 1 and 200"}
+	}
+	cursor, err := decodeDownloadCursor(request.Cursor)
+	if err != nil {
+		return ipc.ListResponse{}, InvalidDownloadActionError{Action: "list", Reason: err.Error()}
+	}
+	downloads, next, more, err := service.store.DownloadPage(ctx, cursor, request.Limit)
 	if err != nil {
 		return ipc.ListResponse{}, err
 	}
 	response := ipc.ListResponse{Downloads: make([]ipc.Download, 0, len(downloads))}
 	for _, download := range downloads {
-		response.Downloads = append(response.Downloads, downloadResponse(download))
+		response.Downloads = append(response.Downloads, downloadSummaryResponse(download))
+	}
+	if more {
+		response.NextCursor, err = encodeDownloadCursor(next)
+		if err != nil {
+			return ipc.ListResponse{}, err
+		}
 	}
 
 	return response, nil
+}
+
+func encodeDownloadCursor(cursor model.DownloadCursor) (string, error) {
+	encoded, err := json.Marshal(struct {
+		CreatedAt time.Time `json:"created_at"`
+		ID        string    `json:"id"`
+	}{CreatedAt: cursor.CreatedAt, ID: cursor.ID.String()})
+	if err != nil {
+		return "", fmt.Errorf("encode download cursor: %w", err)
+	}
+
+	return base64.RawURLEncoding.EncodeToString(encoded), nil
+}
+
+func decodeDownloadCursor(value string) (model.DownloadCursor, error) {
+	if value == "" {
+		return model.DownloadCursor{}, nil
+	}
+	encoded, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil {
+		return model.DownloadCursor{}, fmt.Errorf("cursor is invalid")
+	}
+	var cursor struct {
+		CreatedAt time.Time `json:"created_at"`
+		ID        string    `json:"id"`
+	}
+	if err := decodePayload(encoded, &cursor); err != nil || cursor.CreatedAt.IsZero() {
+		return model.DownloadCursor{}, fmt.Errorf("cursor is invalid")
+	}
+	identifier, err := model.ParseDownloadID(cursor.ID)
+	if err != nil {
+		return model.DownloadCursor{}, fmt.Errorf("cursor is invalid")
+	}
+
+	return model.DownloadCursor{CreatedAt: cursor.CreatedAt, ID: identifier}, nil
 }
 
 func (service *Service) show(ctx context.Context, payload json.RawMessage) (ipc.Download, error) {
@@ -988,6 +1053,19 @@ func downloadResponse(download model.Download) ipc.Download {
 		UpdatedAt:       download.UpdatedAt,
 		Error:           diagnostic.Display(diagnostic.Text(download.Error)),
 	}
+}
+
+func downloadSummaryResponse(download model.Download) ipc.Download {
+	response := downloadResponse(download)
+	response.URL = ""
+	response.Destination = ""
+	response.Error = ""
+	filename := []rune(response.Filename)
+	if len(filename) > maximumSummaryFilename {
+		response.Filename = string(filename[:maximumSummaryFilename-1]) + "…"
+	}
+
+	return response
 }
 
 func newDownload(request ipc.AddRequest, priority model.Priority, defaultDestination string) (model.Download, error) {
