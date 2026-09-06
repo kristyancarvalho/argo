@@ -136,6 +136,30 @@ func TestCLIStatusShowsNetworkAndProfile(t *testing.T) {
 	}
 }
 
+type unavailableNetworkClient struct {
+	*cliClient
+}
+
+func (client *unavailableNetworkClient) Status(context.Context) (ipc.Status, error) {
+	status, err := client.cliClient.Status(context.Background())
+	status.Network.Available = false
+	status.Network.Error = "NetworkManager disconnected"
+
+	return status, err
+}
+
+func TestCLIStatusShowsNetworkObserverFailure(t *testing.T) {
+	client := &unavailableNetworkClient{cliClient: &cliClient{}}
+	var output bytes.Buffer
+	if err := cli.Run(context.Background(), client, &output, []string{"status"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "Network: unavailable") ||
+		!strings.Contains(output.String(), "Network error: NetworkManager disconnected") {
+		t.Fatalf("status output does not expose observer failure: %q", output.String())
+	}
+}
+
 func (client *cliClient) Profile(_ context.Context, name string) (ipc.ProfileResponse, error) {
 	client.called = "profile:" + name
 	return ipc.ProfileResponse{Name: name, Policy: "balanced", PolicyApplied: true}, nil

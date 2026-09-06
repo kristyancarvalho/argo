@@ -2,6 +2,7 @@ package network
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -9,6 +10,12 @@ import (
 )
 
 const signalBufferSize = 16
+
+const (
+	dbusDestination = "org.freedesktop.DBus"
+	dbusInterface   = "org.freedesktop.DBus"
+	dbusPath        = "/org/freedesktop/DBus"
+)
 
 type Event struct{}
 
@@ -27,7 +34,7 @@ type systemEventSubscriber struct {
 
 type systemSubscription struct {
 	connection *dbus.Conn
-	options    []dbus.MatchOption
+	matches    [][]dbus.MatchOption
 	signals    chan *dbus.Signal
 	events     chan Event
 	cancel     context.CancelFunc
@@ -37,10 +44,13 @@ type systemSubscription struct {
 }
 
 func (client *Client) Observe(ctx context.Context, emit func(Snapshot) error) error {
-	if client.events == nil {
+	client.mutex.RLock()
+	events := client.events
+	client.mutex.RUnlock()
+	if events == nil {
 		return fmt.Errorf("network event subscription is unavailable")
 	}
-	subscription, err := client.events.Subscribe(ctx)
+	subscription, err := events.Subscribe(ctx)
 	if err != nil {
 		return fmt.Errorf("subscribe to NetworkManager events: %w", err)
 	}
@@ -84,21 +94,37 @@ func (subscriber *systemEventSubscriber) Subscribe(ctx context.Context) (Subscri
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	options := []dbus.MatchOption{
-		dbus.WithMatchSender(NetworkManagerDestination),
-		dbus.WithMatchInterface(dbusPropertiesInterface),
-		dbus.WithMatchMember("PropertiesChanged"),
-		dbus.WithMatchPathNamespace(dbus.ObjectPath(NetworkManagerPath)),
+	matches := [][]dbus.MatchOption{
+		{
+			dbus.WithMatchSender(NetworkManagerDestination),
+			dbus.WithMatchInterface(dbusPropertiesInterface),
+			dbus.WithMatchMember("PropertiesChanged"),
+			dbus.WithMatchPathNamespace(dbus.ObjectPath(NetworkManagerPath)),
+		},
+		{
+			dbus.WithMatchSender(dbusDestination),
+			dbus.WithMatchInterface(dbusInterface),
+			dbus.WithMatchMember("NameOwnerChanged"),
+			dbus.WithMatchObjectPath(dbus.ObjectPath(dbusPath)),
+			dbus.WithMatchArg(0, NetworkManagerDestination),
+		},
 	}
-	if err := subscriber.connection.AddMatchSignalContext(ctx, options...); err != nil {
-		return nil, err
+	added := make([][]dbus.MatchOption, 0, len(matches))
+	for _, options := range matches {
+		if err := subscriber.connection.AddMatchSignalContext(ctx, options...); err != nil {
+			for _, existing := range added {
+				_ = subscriber.connection.RemoveMatchSignal(existing...)
+			}
+			return nil, err
+		}
+		added = append(added, options)
 	}
 	signals := make(chan *dbus.Signal, signalBufferSize)
 	subscriber.connection.Signal(signals)
 	subscriptionContext, cancel := context.WithCancel(ctx)
 	subscription := &systemSubscription{
 		connection: subscriber.connection,
-		options:    options,
+		matches:    matches,
 		signals:    signals,
 		events:     make(chan Event, signalBufferSize),
 		cancel:     cancel,
@@ -117,7 +143,10 @@ func (subscription *systemSubscription) Close() error {
 	subscription.closeOnce.Do(func() {
 		subscription.cancel()
 		subscription.connection.RemoveSignal(subscription.signals)
-		removeError := subscription.connection.RemoveMatchSignal(subscription.options...)
+		var removeError error
+		for _, options := range subscription.matches {
+			removeError = errors.Join(removeError, subscription.connection.RemoveMatchSignal(options...))
+		}
 		<-subscription.finished
 		subscription.closeError = removeError
 	})

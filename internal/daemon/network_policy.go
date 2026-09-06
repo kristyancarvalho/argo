@@ -3,16 +3,58 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/kristyancarvalho/argo/internal/model"
 	"github.com/kristyancarvalho/argo/internal/network"
 )
 
+const (
+	networkRetryInitial = 100 * time.Millisecond
+	networkRetryMaximum = 5 * time.Second
+)
+
 func (service *Service) runNetworkObserver() {
 	defer service.waitGroup.Done()
 	defer service.markNetworkReady()
-	_ = service.networkObserver.Observe(service.ctx, service.applyNetworkState)
+	delay := networkRetryInitial
+	for {
+		observed := false
+		err := service.networkObserver.Observe(service.ctx, func(snapshot network.Snapshot) error {
+			observed = true
+			return service.applyNetworkState(snapshot)
+		})
+		if service.ctx.Err() != nil {
+			return
+		}
+		if err == nil {
+			err = fmt.Errorf("network observation ended")
+		}
+		service.invalidateNetworkState(err)
+		if reconnector, ok := service.networkObserver.(NetworkReconnector); ok {
+			if reconnectError := reconnector.Reconnect(service.ctx); reconnectError != nil {
+				service.invalidateNetworkState(errors.Join(err, reconnectError))
+			}
+		}
+		if observed {
+			delay = networkRetryInitial
+		} else if delay < networkRetryMaximum {
+			delay *= 2
+			if delay > networkRetryMaximum {
+				delay = networkRetryMaximum
+			}
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-service.ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return
+		case <-timer.C:
+		}
+	}
 }
 
 func (service *Service) applyNetworkState(snapshot network.Snapshot) error {
@@ -25,6 +67,7 @@ func (service *Service) applyNetworkState(snapshot network.Snapshot) error {
 		service.networkSnapshot.Interface != snapshot.Interface
 	service.networkSnapshot = snapshot
 	service.networkAvailable = true
+	service.networkError = ""
 	service.networkMutex.Unlock()
 	service.markNetworkReady()
 	if transitioned {
@@ -42,6 +85,18 @@ func (service *Service) applyNetworkState(snapshot network.Snapshot) error {
 	}
 
 	return nil
+}
+
+func (service *Service) invalidateNetworkState(observationError error) {
+	service.networkPolicyMutex.Lock()
+	defer service.networkPolicyMutex.Unlock()
+	service.networkMutex.Lock()
+	service.networkSnapshot = network.Snapshot{}
+	service.networkAvailable = false
+	service.networkError = observationError.Error()
+	service.networkMutex.Unlock()
+	service.markNetworkReady()
+	_ = service.reconcileTrafficPolicy(service.ctx)
 }
 
 func (service *Service) markNetworkReady() {
