@@ -977,16 +977,16 @@ func actionResponse(identifier model.DownloadID, status model.Status) ipc.Downlo
 func downloadResponse(download model.Download) ipc.Download {
 	return ipc.Download{
 		ID:              download.ID.String(),
-		URL:             diagnostic.URL(download.URL),
-		Destination:     download.Destination,
-		Filename:        download.Filename,
+		URL:             diagnostic.Display(diagnostic.URL(download.URL)),
+		Destination:     diagnostic.Display(download.Destination),
+		Filename:        diagnostic.Display(download.Filename),
 		TotalSize:       download.TotalSize,
 		DownloadedBytes: download.DownloadedBytes,
 		Status:          string(download.Status),
 		Priority:        string(download.Priority),
 		CreatedAt:       download.CreatedAt,
 		UpdatedAt:       download.UpdatedAt,
-		Error:           diagnostic.Text(download.Error),
+		Error:           diagnostic.Display(diagnostic.Text(download.Error)),
 	}
 }
 
@@ -1015,6 +1015,7 @@ func newDownload(request ipc.AddRequest, priority model.Priority, defaultDestina
 		return model.Download{}, InvalidAddRequestError{Reason: "URL filename cannot be decoded"}
 	}
 	filename = filepath.Base(filename)
+	filename = diagnostic.Filename(filename)
 	if filename == "" || filename == "." || filename == string(filepath.Separator) || strings.TrimSpace(filename) == "" {
 		filename = "download"
 	}

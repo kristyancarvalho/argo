@@ -1,9 +1,11 @@
 package diagnostic
 
 import (
+	"fmt"
 	"net/url"
 	"regexp"
 	"strings"
+	"unicode"
 )
 
 var urlPattern = regexp.MustCompile(`(?i)https?://[^\s"'<>]+`)
@@ -41,6 +43,51 @@ func Text(value string) string {
 
 		return URL(trimmed) + suffix
 	})
+}
+
+func Display(value string) string {
+	var output strings.Builder
+	for _, character := range value {
+		switch character {
+		case '\n':
+			output.WriteString(`\n`)
+		case '\r':
+			output.WriteString(`\r`)
+		case '\t':
+			output.WriteString(`\t`)
+		case '\a':
+			output.WriteString(`\a`)
+		default:
+			if unicode.IsControl(character) || unicode.Is(unicode.Cf, character) {
+				if character <= 0xff {
+					_, _ = fmt.Fprintf(&output, `\x%02x`, character)
+				} else if character <= 0xffff {
+					_, _ = fmt.Fprintf(&output, `\u%04x`, character)
+				} else {
+					_, _ = fmt.Fprintf(&output, `\U%08x`, character)
+				}
+				continue
+			}
+			output.WriteRune(character)
+		}
+	}
+
+	return output.String()
+}
+
+func Filename(value string) string {
+	value = strings.Map(func(character rune) rune {
+		if unicode.IsControl(character) || unicode.Is(unicode.Cf, character) {
+			return '_'
+		}
+
+		return character
+	}, value)
+	if strings.TrimSpace(value) == "" {
+		return "download"
+	}
+
+	return value
 }
 
 func Error(source error) error {

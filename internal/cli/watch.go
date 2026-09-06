@@ -6,6 +6,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/kristyancarvalho/argo/internal/diagnostic"
 	"github.com/kristyancarvalho/argo/internal/ipc"
 )
 
@@ -257,13 +258,13 @@ func renderWatchSnapshot(output io.Writer, snapshot WatchSnapshot) error {
 		if _, err := fmt.Fprintf(
 			output,
 			"%s %s %d/%d bytes %s/s ETA %s %s\n",
-			download.ID,
-			download.Status,
+			diagnostic.Display(download.ID),
+			diagnostic.Display(download.Status),
 			download.DownloadedBytes,
 			download.TotalSize,
 			formatRate(download.BytesPerSecond),
 			eta,
-			download.Filename,
+			diagnostic.Display(download.Filename),
 		); err != nil {
 			return err
 		}

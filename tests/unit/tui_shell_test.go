@@ -286,6 +286,24 @@ func TestTUIRedactsSourceAndDiagnosticSecrets(t *testing.T) {
 	}
 }
 
+func TestTUIEscapesUntrustedTerminalControls(t *testing.T) {
+	model := loadTUIModel(t, &tuiStatusClient{
+		status:    ipc.Status{State: "run\x1b\nFAKE\u202e"},
+		downloads: [][]ipc.Download{{{ID: "one", Filename: "file\x1b]0;title\a\nFAKE\r\t\u202e.iso", Status: "failed"}}},
+	})
+	view := model.View()
+	for _, character := range []rune{'\x1b', '\a', '\r', '\t', '\u202e'} {
+		if strings.ContainsRune(view, character) {
+			t.Fatalf("TUI contains control U+%04X: %q", character, view)
+		}
+	}
+	for _, line := range strings.Split(view, "\n") {
+		if line == "FAKE" {
+			t.Fatalf("TUI filename fabricated a row: %q", view)
+		}
+	}
+}
+
 func TestTUIActionsDispatch(t *testing.T) {
 	client := &tuiStatusClient{status: ipc.Status{State: "running"}, downloads: [][]ipc.Download{{{ID: "one"}}}}
 	model := loadTUIModel(t, client)
