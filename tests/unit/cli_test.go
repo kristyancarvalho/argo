@@ -17,6 +17,49 @@ type cliClient struct {
 	watch  bool
 }
 
+type unsafeTerminalClient struct {
+	*cliClient
+}
+
+const unsafeTerminalName = "safe\x1b[31m\x1b]0;title\a\nFAKE\r\t\u202e.iso"
+
+func (client *unsafeTerminalClient) Add(context.Context, string, string) (ipc.AddResponse, error) {
+	return ipc.AddResponse{ID: "id", Filename: unsafeTerminalName, Status: "queued"}, nil
+}
+
+func (client *unsafeTerminalClient) List(context.Context) ([]ipc.Download, error) {
+	return []ipc.Download{{ID: "id", Filename: unsafeTerminalName, Status: "queued", TotalSize: -1}}, nil
+}
+
+func (client *unsafeTerminalClient) Show(context.Context, string) (ipc.Download, error) {
+	return ipc.Download{ID: "id", Filename: unsafeTerminalName, URL: "https://example.test/file", Status: "queued"}, nil
+}
+
+func TestCLIHumanCommandsEscapeUntrustedFilenameControls(t *testing.T) {
+	client := &unsafeTerminalClient{cliClient: &cliClient{}}
+	for _, arguments := range [][]string{{"add", "https://example.test/file"}, {"list"}, {"show", "id"}, {"watch"}} {
+		var output bytes.Buffer
+		if err := cli.Run(context.Background(), client, &output, arguments); err != nil {
+			t.Fatalf("%v returned %v", arguments, err)
+		}
+		assertTerminalSafeOutput(t, output.String())
+	}
+}
+
+func assertTerminalSafeOutput(t *testing.T, output string) {
+	t.Helper()
+	for _, character := range []rune{'\x1b', '\a', '\r', '\t', '\u202e'} {
+		if strings.ContainsRune(output, character) {
+			t.Fatalf("output contains control U+%04X: %q", character, output)
+		}
+	}
+	for _, line := range strings.Split(output, "\n") {
+		if line == "FAKE" {
+			t.Fatalf("filename fabricated an output row: %q", output)
+		}
+	}
+}
+
 func (client *cliClient) Add(_ context.Context, rawURL, _ string) (ipc.AddResponse, error) {
 	client.called = "add:" + rawURL
 	return ipc.AddResponse{ID: "download-id", Filename: "file.bin", Status: "queued"}, nil

@@ -36,3 +36,21 @@ func TestDiagnosticErrorPreservesErrorIdentityWithoutExposingURL(t *testing.T) {
 		t.Fatalf("redacted error exposed credentials: %q", redacted.Error())
 	}
 }
+
+func TestDiagnosticDisplayEscapesTerminalControlsAndPreservesUnicode(t *testing.T) {
+	unsafe := "ESC\x1b[31m OSC\x1b]0;title\a line\nrow\r tab\t bidi\u202eend café-日本語"
+	display := diagnostic.Display(unsafe)
+	for _, character := range []rune{'\x1b', '\a', '\r', '\t', '\u202e'} {
+		if strings.ContainsRune(display, character) {
+			t.Fatalf("display contains control U+%04X: %q", character, display)
+		}
+	}
+	if strings.Contains(display, "line\nrow") || !strings.Contains(display, `line\nrow`) ||
+		!strings.Contains(display, "café-日本語") {
+		t.Fatalf("display escaping returned %q", display)
+	}
+	filename := diagnostic.Filename("café\x1b\n\t\u202e-日本語.iso")
+	if filename != "café____-日本語.iso" {
+		t.Fatalf("safe filename is %q", filename)
+	}
+}

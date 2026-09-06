@@ -247,7 +247,7 @@ func (model Model) View() string {
 		view.WriteString(console.Paint(model.color, console.Yellow, "Connecting to daemon..."))
 		view.WriteByte('\n')
 	case model.err != nil:
-		view.WriteString(console.Paint(model.color, console.Red, "Daemon unavailable: "+diagnostic.Text(model.err.Error())))
+		view.WriteString(console.Paint(model.color, console.Red, "Daemon unavailable: "+diagnostic.Display(diagnostic.Text(model.err.Error()))))
 		view.WriteByte('\n')
 	default:
 		model.renderNetworkAndQoS(&view)
@@ -264,17 +264,17 @@ func (model Model) View() string {
 		}
 		view.WriteString("\n")
 		view.WriteString(console.Paint(model.color, console.Cyan, label))
-		view.WriteString(model.input)
+		view.WriteString(diagnostic.Display(model.input))
 		view.WriteString("\nEnter submit  Esc cancel\n")
 		return view.String()
 	}
 	if model.mode == inputModeCancel || model.mode == inputModeRemove || model.mode == inputModeClear {
 		prompt := "Clear completed, failed, and canceled history? y/N"
 		if model.mode == inputModeCancel && model.hasSelection() {
-			prompt = fmt.Sprintf("Cancel %s? y/N", model.downloads[model.selected].ID)
+			prompt = fmt.Sprintf("Cancel %s? y/N", diagnostic.Display(model.downloads[model.selected].ID))
 		}
 		if model.mode == inputModeRemove && model.hasSelection() {
-			prompt = fmt.Sprintf("Remove %s from history? y/N", model.downloads[model.selected].ID)
+			prompt = fmt.Sprintf("Remove %s from history? y/N", diagnostic.Display(model.downloads[model.selected].ID))
 		}
 		view.WriteString(console.Paint(model.color, console.Yellow, "\n"+prompt+"\n"))
 		return view.String()
@@ -284,11 +284,11 @@ func (model Model) View() string {
 		return view.String()
 	}
 	if model.actionErr != nil {
-		view.WriteString(console.Paint(model.color, console.Red, "\nAction failed: "+diagnostic.Text(model.actionErr.Error())))
+		view.WriteString(console.Paint(model.color, console.Red, "\nAction failed: "+diagnostic.Display(diagnostic.Text(model.actionErr.Error()))))
 		view.WriteByte('\n')
 	} else if model.notice != "" {
 		view.WriteString("\n")
-		view.WriteString(console.Paint(model.color, console.Green, model.notice))
+		view.WriteString(console.Paint(model.color, console.Green, diagnostic.Display(model.notice)))
 		view.WriteByte('\n')
 	}
 	if width < 72 {
@@ -321,16 +321,16 @@ func (model Model) renderDownloads(view *strings.Builder, width int) {
 		speed := model.speeds[download.ID]
 		var row string
 		if width < 72 {
-			filename := truncateRunes(download.Filename, max(12, width-4))
+			filename := truncateRunes(diagnostic.Display(download.Filename), max(12, width-4))
 			row = fmt.Sprintf("%s %s\n  %s  %s  %s\n  %s  ETA %s  %s\n",
-				marker, filename, shortID(download.ID), download.Status, formatTUIProgress(download),
-				formatTUISpeed(speed), model.formatTUIETA(download), download.Priority)
+				marker, filename, shortID(download.ID), diagnostic.Display(download.Status), formatTUIProgress(download),
+				formatTUISpeed(speed), model.formatTUIETA(download), diagnostic.Display(download.Priority))
 		} else {
 			filenameWidth := max(14, width-65)
 			row = fmt.Sprintf("%s %-*s %12s %10s %8s %-11s %-6s %s\n",
-				marker, filenameWidth, truncateRunes(download.Filename, filenameWidth),
+				marker, filenameWidth, truncateRunes(diagnostic.Display(download.Filename), filenameWidth),
 				formatTUIProgress(download), formatTUISpeed(speed), model.formatTUIETA(download),
-				download.Status, download.Priority, shortID(download.ID))
+				diagnostic.Display(download.Status), diagnostic.Display(download.Priority), shortID(download.ID))
 		}
 		color := statusColor(download.Status)
 		if index == model.selected {
@@ -352,13 +352,13 @@ func (model Model) renderSelected(view *strings.Builder, width int) {
 	view.WriteString(console.Paint(model.color, console.Bold, "Selected"))
 	view.WriteByte('\n')
 	if model.height > 0 && model.height < 22 {
-		_, _ = fmt.Fprintf(view, "  %s  %s  %s\n", shortID(download.ID), download.Status, download.Priority)
-		_, _ = fmt.Fprintf(view, "  %s\n", truncateRunes(download.Filename, max(8, width-4)))
+		_, _ = fmt.Fprintf(view, "  %s  %s  %s\n", shortID(download.ID), diagnostic.Display(download.Status), diagnostic.Display(download.Priority))
+		_, _ = fmt.Fprintf(view, "  %s\n", truncateRunes(diagnostic.Display(download.Filename), max(8, width-4)))
 		return
 	}
-	_, _ = fmt.Fprintf(view, "  ID: %s\n  State: %s    Priority: %s\n", download.ID, download.Status, download.Priority)
-	_, _ = fmt.Fprintf(view, "  File: %s\n", truncateRunes(download.Filename, max(8, width-8)))
-	_, _ = fmt.Fprintf(view, "  Source: %s\n", truncateRunes(diagnostic.URL(download.URL), max(8, width-10)))
+	_, _ = fmt.Fprintf(view, "  ID: %s\n  State: %s    Priority: %s\n", diagnostic.Display(download.ID), diagnostic.Display(download.Status), diagnostic.Display(download.Priority))
+	_, _ = fmt.Fprintf(view, "  File: %s\n", truncateRunes(diagnostic.Display(download.Filename), max(8, width-8)))
+	_, _ = fmt.Fprintf(view, "  Source: %s\n", truncateRunes(diagnostic.Display(diagnostic.URL(download.URL)), max(8, width-10)))
 }
 
 func (model Model) renderHelp(view *strings.Builder) {
@@ -388,11 +388,11 @@ func (model Model) renderNetworkAndQoS(view *strings.Builder) {
 		_, _ = fmt.Fprintf(view, "Network: %s  Interface: %s\n", networkState, statusValue(model.status.Network.Interface))
 		_, _ = fmt.Fprintf(view, "Profile: %s  Traffic policy: %s\n", statusValue(model.status.ActiveProfile), statusValue(model.status.Traffic.Policy))
 		if model.status.Traffic.Error != "" {
-			view.WriteString(console.Paint(model.color, console.Red, "QoS error: "+diagnostic.Text(model.status.Traffic.Error)))
+			view.WriteString(console.Paint(model.color, console.Red, "QoS error: "+diagnostic.Display(diagnostic.Text(model.status.Traffic.Error))))
 			view.WriteByte('\n')
 		}
 		if model.status.Network.Error != "" {
-			view.WriteString(console.Paint(model.color, console.Red, "Network error: "+diagnostic.Text(model.status.Network.Error)))
+			view.WriteString(console.Paint(model.color, console.Red, "Network error: "+diagnostic.Display(diagnostic.Text(model.status.Network.Error))))
 			view.WriteByte('\n')
 		}
 		return
@@ -401,7 +401,7 @@ func (model Model) renderNetworkAndQoS(view *strings.Builder) {
 		_, _ = fmt.Fprintf(
 			view,
 			"Network: %s\nInterface: %s    Metered: %s\nProfile: %s\nTraffic policy: %s\nArgo throughput: %s\n",
-			networkState,
+			diagnostic.Display(networkState),
 			statusValue(model.status.Network.Interface),
 			statusValue(model.status.Network.Metered),
 			statusValue(model.status.ActiveProfile),
@@ -412,7 +412,7 @@ func (model Model) renderNetworkAndQoS(view *strings.Builder) {
 		_, _ = fmt.Fprintf(
 			view,
 			"Network: %s  Interface: %s  Metered: %s\nProfile: %s  Traffic policy: %s  Argo throughput: %s\n",
-			networkState,
+			diagnostic.Display(networkState),
 			statusValue(model.status.Network.Interface),
 			statusValue(model.status.Network.Metered),
 			statusValue(model.status.ActiveProfile),
@@ -426,11 +426,11 @@ func (model Model) renderNetworkAndQoS(view *strings.Builder) {
 		view.WriteString("Adaptive limit: unavailable\n")
 	}
 	if model.status.Traffic.Error != "" {
-		view.WriteString(console.Paint(model.color, console.Red, "QoS error: "+diagnostic.Text(model.status.Traffic.Error)))
+		view.WriteString(console.Paint(model.color, console.Red, "QoS error: "+diagnostic.Display(diagnostic.Text(model.status.Traffic.Error))))
 		view.WriteByte('\n')
 	}
 	if model.status.Network.Error != "" {
-		view.WriteString(console.Paint(model.color, console.Red, "Network error: "+diagnostic.Text(model.status.Network.Error)))
+		view.WriteString(console.Paint(model.color, console.Red, "Network error: "+diagnostic.Display(diagnostic.Text(model.status.Network.Error))))
 		view.WriteByte('\n')
 	}
 	if model.status.Traffic.LatencyAvailable {
@@ -439,7 +439,7 @@ func (model Model) renderNetworkAndQoS(view *strings.Builder) {
 			_, _ = fmt.Fprintf(view, " (baseline %s)", model.status.Traffic.BaselineLatency)
 		}
 		if model.status.Traffic.ControllerState != "" {
-			_, _ = fmt.Fprintf(view, "  Controller: %s", model.status.Traffic.ControllerState)
+			_, _ = fmt.Fprintf(view, "  Controller: %s", diagnostic.Display(model.status.Traffic.ControllerState))
 		}
 		view.WriteByte('\n')
 	} else {
@@ -461,7 +461,7 @@ func statusValue(value string) string {
 		return "unknown"
 	}
 
-	return value
+	return diagnostic.Display(value)
 }
 
 func (model Model) updateTextInput(message tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -746,6 +746,7 @@ func statusColor(status string) console.Code {
 }
 
 func shortID(value string) string {
+	value = diagnostic.Display(value)
 	return truncateRunes(value, 8)
 }
 
