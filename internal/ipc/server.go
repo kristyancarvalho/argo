@@ -17,16 +17,22 @@ import (
 
 const (
 	maximumMessageSize = 1 << 20
+	maximumConnections = 64
 	acceptInterval     = 250 * time.Millisecond
 	connectionTimeout  = 5 * time.Second
 )
 
 type Server struct {
-	listener   *net.UnixListener
-	handler    Handler
-	socketPath string
-	closeOnce  sync.Once
-	closeError error
+	listener    *net.UnixListener
+	handler     Handler
+	socketPath  string
+	closeOnce   sync.Once
+	closeError  error
+	workers     sync.WaitGroup
+	connections chan struct{}
+	activeMutex sync.Mutex
+	active      map[*net.UnixConn]struct{}
+	closing     bool
 }
 
 func Listen(socketPath string, handler Handler) (*Server, error) {
@@ -55,15 +61,18 @@ func Listen(socketPath string, handler Handler) (*Server, error) {
 	}
 
 	return &Server{
-		listener:   listener,
-		handler:    handler,
-		socketPath: socketPath,
+		listener:    listener,
+		handler:     handler,
+		socketPath:  socketPath,
+		connections: make(chan struct{}, maximumConnections),
+		active:      make(map[*net.UnixConn]struct{}),
 	}, nil
 }
 
 func (server *Server) Serve(ctx context.Context) (serveError error) {
 	defer func() {
 		serveError = errors.Join(serveError, server.Close())
+		server.workers.Wait()
 	}()
 
 	for {
@@ -84,13 +93,45 @@ func (server *Server) Serve(ctx context.Context) (serveError error) {
 			}
 			return fmt.Errorf("accept IPC connection: %w", err)
 		}
-		server.handleConnection(ctx, connection)
+		select {
+		case server.connections <- struct{}{}:
+			server.activeMutex.Lock()
+			if server.closing {
+				server.activeMutex.Unlock()
+				<-server.connections
+				_ = connection.Close()
+				continue
+			}
+			server.active[connection] = struct{}{}
+			server.activeMutex.Unlock()
+			server.workers.Add(1)
+			go func() {
+				defer server.workers.Done()
+				defer func() { <-server.connections }()
+				defer server.forgetConnection(connection)
+				server.handleConnection(ctx, connection)
+			}()
+		default:
+			_ = connection.SetDeadline(time.Now().Add(connectionTimeout))
+			server.writeError(connection, "", "server_busy", "too many concurrent requests")
+			_ = connection.Close()
+		}
 	}
 }
 
 func (server *Server) Close() error {
 	server.closeOnce.Do(func() {
 		server.closeError = server.listener.Close()
+		server.activeMutex.Lock()
+		server.closing = true
+		connections := make([]*net.UnixConn, 0, len(server.active))
+		for connection := range server.active {
+			connections = append(connections, connection)
+		}
+		server.activeMutex.Unlock()
+		for _, connection := range connections {
+			server.closeError = errors.Join(server.closeError, connection.Close())
+		}
 	})
 	if server.closeError != nil && !errors.Is(server.closeError, net.ErrClosed) {
 		return fmt.Errorf("close IPC server: %w", server.closeError)
@@ -113,12 +154,12 @@ func (server *Server) handleConnection(ctx context.Context, connection *net.Unix
 
 	reader := bufio.NewReader(io.LimitReader(connection, maximumMessageSize+1))
 	message, err := reader.ReadBytes('\n')
-	if err != nil {
-		server.writeError(connection, "", "malformed_request", "request must be newline terminated")
-		return
-	}
 	if len(message) > maximumMessageSize {
 		server.writeError(connection, "", "request_too_large", "request exceeds maximum message size")
+		return
+	}
+	if err != nil {
+		server.writeError(connection, "", "malformed_request", "request must be newline terminated")
 		return
 	}
 
@@ -133,7 +174,28 @@ func (server *Server) handleConnection(ctx context.Context, connection *net.Unix
 		return
 	}
 
-	result, err := server.handler.Handle(ctx, request)
+	requestContext, cancel := context.WithTimeout(ctx, connectionTimeout)
+	stopClose := context.AfterFunc(requestContext, func() {
+		_ = connection.Close()
+	})
+	defer func() {
+		stopClose()
+		cancel()
+	}()
+	peerClosed := make(chan struct{})
+	go func() {
+		var buffer [1]byte
+		_, _ = connection.Read(buffer[:])
+		close(peerClosed)
+	}()
+	go func() {
+		select {
+		case <-peerClosed:
+			cancel()
+		case <-requestContext.Done():
+		}
+	}()
+	result, err := server.handler.Handle(requestContext, request)
 	if err != nil {
 		var unsupported UnsupportedOperationError
 		if errors.As(err, &unsupported) {
@@ -159,6 +221,12 @@ func (server *Server) handleConnection(ctx context.Context, connection *net.Unix
 		OK:      true,
 		Result:  encodedResult,
 	})
+}
+
+func (server *Server) forgetConnection(connection *net.UnixConn) {
+	server.activeMutex.Lock()
+	delete(server.active, connection)
+	server.activeMutex.Unlock()
 }
 
 func decodeRequest(message []byte) (Request, *ResponseError) {

@@ -5,10 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/kristyancarvalho/argo/internal/model"
 	"golang.org/x/sys/unix"
 )
+
+const canceledResumeValidationTimeout = 5 * time.Second
 
 func (engine *Engine) prepareResumeState(
 	ctx context.Context,
@@ -45,6 +48,8 @@ func (engine *Engine) prepareResumeState(
 }
 
 func (engine *Engine) ValidateCanceledResume(ctx context.Context, download model.Download) error {
+	validationContext, cancel := context.WithTimeout(ctx, canceledResumeValidationTimeout)
+	defer cancel()
 	if download.Status != model.StatusCanceled {
 		return ResumeUnavailableError{ID: download.ID.String(), Reason: "download is not canceled"}
 	}
@@ -71,7 +76,7 @@ func (engine *Engine) ValidateCanceledResume(ctx context.Context, download model
 	if info.Size() < download.DownloadedBytes {
 		return ResumeUnavailableError{ID: download.ID.String(), Reason: "partial data is incomplete or invalid"}
 	}
-	metadata, err := NewInspector(engine.httpClient).Inspect(ctx, download.URL)
+	metadata, err := NewInspector(engine.httpClient).Inspect(validationContext, download.URL)
 	if err != nil {
 		return ResumeUnavailableError{ID: download.ID.String(), Reason: err.Error()}
 	}
