@@ -20,6 +20,9 @@ func TestQoSHelperExecutableLifecycle(t *testing.T) {
 	}
 	root := filepath.Clean(filepath.Join(workingDirectory, "..", ".."))
 	temporaryDirectory := t.TempDir()
+	if err := os.Chmod(temporaryDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	binary := filepath.Join(temporaryDirectory, "argo-qosd")
 	build := exec.Command("go", "build", "-o", binary, "./cmd/argo-qosd")
 	build.Dir = root

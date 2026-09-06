@@ -255,6 +255,142 @@ func TestIPCRefusesToReplaceRegularFile(t *testing.T) {
 	}
 }
 
+func TestIPCRejectsInsecureAndSymlinkedSocketDirectories(t *testing.T) {
+	t.Run("world writable", func(t *testing.T) {
+		directory := filepath.Join(t.TempDir(), "runtime")
+		if err := os.Mkdir(directory, 0o777); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(directory, 0o777); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ipc.Listen(filepath.Join(directory, "argod.sock"), ipc.NewStatusHandler()); err == nil || !strings.Contains(err.Error(), "permissions") {
+			t.Fatalf("world-writable directory returned %v", err)
+		}
+	})
+	t.Run("symlink component", func(t *testing.T) {
+		base := t.TempDir()
+		realDirectory := filepath.Join(base, "real")
+		if err := os.Mkdir(realDirectory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		linkedDirectory := filepath.Join(base, "linked")
+		if err := os.Symlink(realDirectory, linkedDirectory); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ipc.Listen(filepath.Join(linkedDirectory, "argod.sock"), ipc.NewStatusHandler()); err == nil {
+			t.Fatal("symlinked socket directory was accepted")
+		}
+	})
+}
+
+func TestIPCFallbackRejectsPrecreatedInsecureDirectory(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", "")
+	temporary := t.TempDir()
+	t.Setenv("TMPDIR", temporary)
+	path, err := ipc.DefaultSocketPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Dir(path), 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ipc.Listen(path, ipc.NewStatusHandler()); err == nil {
+		t.Fatal("precreated insecure fallback directory was accepted")
+	}
+}
+
+func TestIPCRejectsAttackerOwnedSocketDirectoryWhenPrivileged(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("changing directory ownership requires root")
+	}
+	directory := filepath.Join(t.TempDir(), "attacker")
+	if err := os.Mkdir(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chown(directory, 65534, 65534); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ipc.Listen(filepath.Join(directory, "argod.sock"), ipc.NewStatusHandler()); err == nil || !strings.Contains(err.Error(), "owned by user ID") {
+		t.Fatalf("attacker-owned directory returned %v", err)
+	}
+}
+
+func TestIPCClientRejectsSocketInsideInsecureDirectory(t *testing.T) {
+	directory := filepath.Join(t.TempDir(), "shared")
+	if err := os.Mkdir(directory, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(directory, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(directory, "argod.sock")
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = listener.Close() }()
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ipc.NewClient(path).Status(context.Background()); err == nil || !strings.Contains(err.Error(), "socket directory") {
+		t.Fatalf("client accepted insecure socket directory: %v", err)
+	}
+}
+
+func TestIPCReusesSecureDirectoryAndRecoversOwnedStaleSocket(t *testing.T) {
+	directory := t.TempDir()
+	if err := os.Chmod(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(directory, "argod.sock")
+	stale, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale.SetUnlinkOnClose(false)
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := stale.Close(); err != nil {
+		t.Fatal(err)
+	}
+	server, err := ipc.Listen(path, ipc.NewStatusHandler())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := server.Close(); err != nil {
+		t.Fatal(err)
+	}
+	server, err = ipc.Listen(path, ipc.NewStatusHandler())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := server.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestIPCClientRejectsUnexpectedServerUIDAndUnsafeSocketMode(t *testing.T) {
+	server, cancel, finished := startIPCServer(t)
+	defer stopIPCServer(t, server, cancel, finished)
+	client := ipc.NewClient(server.SocketPath())
+	client.ExpectedUID = uint32(os.Geteuid()) + 1
+	if _, err := client.Status(context.Background()); err == nil || !strings.Contains(err.Error(), "authenticate daemon") {
+		t.Fatalf("unexpected server UID returned %v", err)
+	}
+	client.ExpectedUID = uint32(os.Geteuid())
+	if err := os.Chmod(server.SocketPath(), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Status(context.Background()); err == nil || !strings.Contains(err.Error(), "socket permissions") {
+		t.Fatalf("unsafe socket mode returned %v", err)
+	}
+}
+
 func startIPCServer(t *testing.T) (*ipc.Server, context.CancelFunc, <-chan error) {
 	t.Helper()
 	return startIPCServerWithHandler(t, ipc.NewStatusHandler())

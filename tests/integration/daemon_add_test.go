@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -34,7 +35,11 @@ func TestAddDownloadThroughDaemonIPC(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	socketPath := filepath.Join(t.TempDir(), "argod.sock")
+	socketDirectory := t.TempDir()
+	if err := os.Chmod(socketDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	socketPath := filepath.Join(socketDirectory, "argod.sock")
 	server, err := ipc.Listen(socketPath, service)
 	if err != nil {
 		t.Fatal(err)

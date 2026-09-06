@@ -11,16 +11,21 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"path/filepath"
 	"time"
+
+	"github.com/kristyancarvalho/argo/internal/unixsocket"
 )
 
 type Client struct {
-	SocketPath string
-	Timeout    time.Duration
+	SocketPath  string
+	Timeout     time.Duration
+	ExpectedUID uint32
 }
 
 func NewClient(socketPath string) *Client {
-	return &Client{SocketPath: socketPath, Timeout: connectionTimeout}
+	return &Client{SocketPath: socketPath, Timeout: connectionTimeout, ExpectedUID: uint32(os.Geteuid())}
 }
 
 func (client *Client) Status(ctx context.Context) (Status, error) {
@@ -155,6 +160,9 @@ func (client *Client) downloadAction(
 }
 
 func (client *Client) Call(ctx context.Context, operation Operation, payload any, result any) error {
+	if err := unixsocket.Validate(filepath.Dir(client.SocketPath)); err != nil {
+		return fmt.Errorf("validate daemon socket directory: %w", err)
+	}
 	requestID, err := newRequestID()
 	if err != nil {
 		return err
@@ -178,6 +186,12 @@ func (client *Client) Call(ctx context.Context, operation Operation, payload any
 	defer func() {
 		_ = connection.Close()
 	}()
+	if err := unixsocket.ValidateSocket(client.SocketPath); err != nil {
+		return fmt.Errorf("validate daemon socket: %w", err)
+	}
+	if err := unixsocket.ValidatePeer(connection, client.ExpectedUID); err != nil {
+		return fmt.Errorf("authenticate daemon: %w", err)
+	}
 	stopClose := context.AfterFunc(ctx, func() {
 		_ = connection.Close()
 	})

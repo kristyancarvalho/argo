@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/kristyancarvalho/argo/internal/diagnostic"
+	"github.com/kristyancarvalho/argo/internal/unixsocket"
 )
 
 const (
@@ -44,8 +45,8 @@ func Listen(socketPath string, handler Handler) (*Server, error) {
 	if handler == nil {
 		return nil, fmt.Errorf("IPC handler is nil")
 	}
-	if err := os.MkdirAll(filepath.Dir(socketPath), 0o700); err != nil {
-		return nil, fmt.Errorf("create socket directory: %w", err)
+	if err := unixsocket.Prepare(filepath.Dir(socketPath)); err != nil {
+		return nil, fmt.Errorf("secure socket directory: %w", err)
 	}
 	if err := removeStaleSocket(socketPath); err != nil {
 		return nil, err
@@ -299,6 +300,9 @@ func removeStaleSocket(socketPath string) error {
 	}
 	if info.Mode()&os.ModeSocket == 0 {
 		return fmt.Errorf("refuse to replace non-socket path %s", socketPath)
+	}
+	if err := unixsocket.ValidateSocket(socketPath); err != nil {
+		return fmt.Errorf("refuse to replace unsafe Unix socket %s: %w", socketPath, err)
 	}
 
 	connection, dialErr := net.DialTimeout("unix", socketPath, acceptInterval)
