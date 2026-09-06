@@ -44,7 +44,9 @@ type errorMessage struct {
 	err error
 }
 
-type refreshMessage struct{}
+type refreshMessage struct {
+	generation uint64
+}
 
 type actionResultMessage struct {
 	message string
@@ -94,10 +96,14 @@ type Model struct {
 	height    int
 	offset    int
 	help      bool
+	tick      func(time.Duration, func(time.Time) tea.Msg) tea.Cmd
+	refresh   uint64
+	pending   bool
 }
 
 type Options struct {
 	Color bool
+	Tick  func(time.Duration, func(time.Time) tea.Msg) tea.Cmd
 }
 
 func NewModel(ctx context.Context, client Client) (Model, error) {
@@ -109,6 +115,10 @@ func NewModelWithOptions(ctx context.Context, client Client, options Options) (M
 		return Model{}, fmt.Errorf("TUI requires context and daemon client")
 	}
 
+	if options.Tick == nil {
+		options.Tick = tea.Tick
+	}
+
 	return Model{
 		ctx:      ctx,
 		client:   client,
@@ -116,6 +126,7 @@ func NewModelWithOptions(ctx context.Context, client Client, options Options) (M
 		etas:     make(map[string]time.Duration),
 		previous: make(map[string]transferPoint),
 		color:    options.Color,
+		tick:     options.Tick,
 	}, nil
 }
 
@@ -203,16 +214,20 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case snapshotMessage:
 		model.applySnapshot(message)
-		return model, refreshAfter(time.Second)
+		return model, model.scheduleRefresh(time.Second)
 	case errorMessage:
 		model.err = message.err
 		model.ready = true
-		return model, refreshAfter(time.Second)
+		return model, model.scheduleRefresh(time.Second)
 	case actionResultMessage:
 		model.actionErr = message.err
 		model.notice = message.message
 		return model, model.loadSnapshot
 	case refreshMessage:
+		if !model.pending || message.generation != model.refresh {
+			return model, nil
+		}
+		model.pending = false
 		return model, model.loadSnapshot
 	case tea.WindowSizeMsg:
 		model.width = message.Width
@@ -677,9 +692,16 @@ func (model *Model) applySnapshot(message snapshotMessage) {
 	model.previous = current
 }
 
-func refreshAfter(delay time.Duration) tea.Cmd {
-	return tea.Tick(delay, func(time.Time) tea.Msg {
-		return refreshMessage{}
+func (model *Model) scheduleRefresh(delay time.Duration) tea.Cmd {
+	if model.pending {
+		return nil
+	}
+	model.refresh++
+	model.pending = true
+	generation := model.refresh
+
+	return model.tick(delay, func(time.Time) tea.Msg {
+		return refreshMessage{generation: generation}
 	})
 }
 
