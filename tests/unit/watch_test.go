@@ -3,6 +3,7 @@ package unit_test
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"testing"
 	"time"
 
@@ -156,6 +157,37 @@ func TestWatchZeroSpeedAndResumedSamplesRequireReliableData(t *testing.T) {
 	}
 	if snapshots[3].Downloads[0].ETASeconds == nil {
 		t.Fatal("resumed download did not produce ETA after two reliable samples")
+	}
+}
+
+func TestWatchLargeETAIsUnknownInsteadOfOverflowing(t *testing.T) {
+	startedAt := time.Date(2026, 9, 6, 1, 2, 3, 0, time.UTC)
+	ticks := make(chan time.Time, 3)
+	for index := 1; index <= 3; index++ {
+		ticks <- startedAt.Add(time.Duration(index) * time.Second)
+	}
+	client := &watchSequenceClient{snapshots: [][]ipc.Download{
+		{{ID: "large", Status: "downloading", TotalSize: math.MaxInt64}},
+		{{ID: "large", Status: "downloading", DownloadedBytes: 1, TotalSize: math.MaxInt64}},
+		{{ID: "large", Status: "downloading", DownloadedBytes: 2, TotalSize: math.MaxInt64}},
+		{{ID: "large", Status: "completed", DownloadedBytes: math.MaxInt64, TotalSize: math.MaxInt64}},
+	}}
+	watcher := cli.NewWatcherWithOptions(client, cli.WatchOptions{
+		Now: func() time.Time { return startedAt }, Ticks: ticks,
+	})
+	var snapshots []cli.WatchSnapshot
+	if err := watcher.Stream(context.Background(), func(snapshot cli.WatchSnapshot) error {
+		snapshots = append(snapshots, snapshot)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if snapshots[2].Downloads[0].ETASeconds != nil {
+		t.Fatalf("unrepresentable ETA was exposed as %v", *snapshots[2].Downloads[0].ETASeconds)
+	}
+	completed := snapshots[3].Downloads[0].ETASeconds
+	if completed == nil || *completed != 0 {
+		t.Fatalf("completed ETA is %v", completed)
 	}
 }
 

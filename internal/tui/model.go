@@ -11,6 +11,7 @@ import (
 	"github.com/kristyancarvalho/argo/internal/console"
 	"github.com/kristyancarvalho/argo/internal/diagnostic"
 	"github.com/kristyancarvalho/argo/internal/ipc"
+	"github.com/kristyancarvalho/argo/internal/telemetry"
 )
 
 const (
@@ -796,9 +797,12 @@ func (model *Model) applySnapshot(message snapshotMessage) {
 				point.samples++
 				if point.samples >= tuiMinimumETASamples && (!point.etaVisible || message.at.Sub(point.etaAt) >= tuiETAInterval) {
 					seconds := float64(download.TotalSize-download.DownloadedBytes) / point.smoothed
-					point.eta = time.Duration(seconds * float64(time.Second))
-					point.etaAt = message.at
-					point.etaVisible = true
+					eta, valid := telemetry.DurationForSeconds(seconds)
+					point.etaVisible = valid
+					if valid {
+						point.eta = eta
+						point.etaAt = message.at
+					}
 				}
 			} else {
 				point.smoothed = 0
