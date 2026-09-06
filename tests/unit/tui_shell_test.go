@@ -138,6 +138,61 @@ func TestTUIModelShowsIPCUnavailableState(t *testing.T) {
 	}
 }
 
+func TestTUIActionsKeepSinglePeriodicRefresh(t *testing.T) {
+	client := &tuiStatusClient{
+		status:    ipc.Status{State: "running"},
+		downloads: [][]ipc.Download{{{ID: "one", Status: "paused"}}},
+	}
+	scheduled := 0
+	model, err := tui.NewModelWithOptions(context.Background(), client, tui.Options{
+		Tick: func(_ time.Duration, callback func(time.Time) tea.Msg) tea.Cmd {
+			scheduled++
+			return func() tea.Msg { return callback(time.Unix(int64(scheduled), 0)) }
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, periodic := model.Update(model.Init()())
+	model = updated.(tui.Model)
+	if periodic == nil || scheduled != 1 {
+		t.Fatalf("initial snapshot scheduled %d periodic refreshes", scheduled)
+	}
+	for range 200 {
+		updated, action := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		if action == nil {
+			t.Fatal("pause action was not dispatched")
+		}
+		updated, reload := updated.(tui.Model).Update(action())
+		if reload == nil {
+			t.Fatal("action result did not request a current snapshot")
+		}
+		updated, duplicate := updated.(tui.Model).Update(reload())
+		if duplicate != nil {
+			t.Fatal("action snapshot created another periodic refresh")
+		}
+		model = updated.(tui.Model)
+	}
+	if scheduled != 1 {
+		t.Fatalf("200 actions left %d periodic refreshes", scheduled)
+	}
+	if client.listCall != 201 {
+		t.Fatalf("200 actions made %d list requests, expected 201 including initial load", client.listCall)
+	}
+	updated, reload := model.Update(periodic())
+	if reload == nil {
+		t.Fatal("periodic refresh did not load a snapshot")
+	}
+	updated, next := updated.(tui.Model).Update(reload())
+	if next == nil || scheduled != 2 {
+		t.Fatalf("completed periodic cycle scheduled %d refreshes", scheduled)
+	}
+	_, stale := updated.(tui.Model).Update(periodic())
+	if stale != nil {
+		t.Fatal("stale periodic message started another refresh cycle")
+	}
+}
+
 func TestTUIModelRejectsMissingDependencies(t *testing.T) {
 	if _, err := tui.NewModel(context.Background(), nil); err == nil {
 		t.Fatal("nil client was accepted")
