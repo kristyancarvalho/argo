@@ -3,11 +3,13 @@ package unit_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/kristyancarvalho/argo/internal/ipc"
 	"github.com/kristyancarvalho/argo/internal/tui"
 )
@@ -550,6 +552,79 @@ func TestTUIHelpViewAndResponsiveViewport(t *testing.T) {
 	for _, line := range strings.Split(view, "\n") {
 		if len([]rune(line)) > 48 {
 			t.Fatalf("narrow view line exceeds width: %d %q", len([]rune(line)), line)
+		}
+	}
+}
+
+func TestTUIViewStaysInsideTerminalCellAndLineBounds(t *testing.T) {
+	downloads := make([]ipc.Download, 20)
+	for index := range downloads {
+		downloads[index] = ipc.Download{
+			ID:        strings.Repeat(string(rune('a'+index)), 32),
+			Filename:  strings.Repeat("界e\u0301", 30),
+			Status:    "downloading",
+			Priority:  "normal",
+			TotalSize: 100,
+		}
+	}
+	client := &tuiStatusClient{
+		status: ipc.Status{
+			State:         "running",
+			ActiveProfile: strings.Repeat("wide-profile-", 20),
+			Network:       ipc.NetworkStatus{Available: true, Connected: true, State: "connected", Interface: strings.Repeat("interface", 20)},
+			Traffic:       ipc.TrafficStatus{Policy: "throughput", Error: strings.Repeat("helper error ", 20)},
+		},
+		downloads: [][]ipc.Download{downloads},
+	}
+	base := loadTUIModel(t, client)
+	for _, dimensions := range [][2]int{{20, 12}, {32, 12}, {71, 24}, {72, 24}, {80, 24}} {
+		width, height := dimensions[0], dimensions[1]
+		t.Run(fmt.Sprintf("%dx%d", width, height), func(t *testing.T) {
+			updated, _ := base.Update(tea.WindowSizeMsg{Width: width, Height: height})
+			model := updated.(tui.Model)
+			for range 15 {
+				updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+				model = updated.(tui.Model)
+			}
+			assertTUIViewBounds(t, model.View(), width, height)
+			if !strings.Contains(ansi.Strip(model.View()), ">") {
+				t.Fatalf("selected row is not visible: %q", model.View())
+			}
+			for _, key := range []rune{'?', 'a', 'f', 'x', 'C', 't'} {
+				modal, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{key}})
+				assertTUIViewBounds(t, modal.(tui.Model).View(), width, height)
+			}
+		})
+	}
+}
+
+func TestTUIViewBoundsLongDaemonAndActionErrors(t *testing.T) {
+	width, height := 20, 8
+	unavailable := loadTUIModel(t, &tuiStatusClient{err: errors.New(strings.Repeat("connection failure ", 30))})
+	updated, _ := unavailable.Update(tea.WindowSizeMsg{Width: width, Height: height})
+	assertTUIViewBounds(t, updated.(tui.Model).View(), width, height)
+
+	client := &tuiStatusClient{
+		status:    ipc.Status{State: "running"},
+		downloads: [][]ipc.Download{{{ID: "one", Filename: "file", Status: "downloading"}}},
+		actionErr: errors.New(strings.Repeat("action failure ", 30)),
+	}
+	model := loadTUIModel(t, client)
+	updated, _ = model.Update(tea.WindowSizeMsg{Width: width, Height: height})
+	updated, command := updated.(tui.Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	updated, _ = updated.(tui.Model).Update(command())
+	assertTUIViewBounds(t, updated.(tui.Model).View(), width, height)
+}
+
+func assertTUIViewBounds(t *testing.T, view string, width, height int) {
+	t.Helper()
+	lines := strings.Split(strings.TrimSuffix(view, "\n"), "\n")
+	if len(lines) > height {
+		t.Fatalf("view has %d lines for height %d: %q", len(lines), height, view)
+	}
+	for _, line := range lines {
+		if measured := ansi.StringWidth(line); measured > width {
+			t.Fatalf("view line occupies %d cells for width %d: %q", measured, width, line)
 		}
 	}
 }
