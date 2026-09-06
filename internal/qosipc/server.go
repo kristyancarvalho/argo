@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/kristyancarvalho/argo/internal/unixsocket"
 )
 
 const (
@@ -52,8 +54,8 @@ func Listen(socketPath string, handler Handler, authorizer Authorizer) (*Server,
 	if authorizer == nil {
 		return nil, fmt.Errorf("QoS helper authorizer is required")
 	}
-	if err := os.MkdirAll(filepath.Dir(socketPath), 0o700); err != nil {
-		return nil, fmt.Errorf("create QoS helper socket directory: %w", err)
+	if err := unixsocket.Prepare(filepath.Dir(socketPath)); err != nil {
+		return nil, fmt.Errorf("secure QoS helper socket directory: %w", err)
 	}
 	if err := removeStaleSocket(socketPath); err != nil {
 		return nil, err
@@ -276,6 +278,9 @@ func removeStaleSocket(socketPath string) error {
 	}
 	if info.Mode()&os.ModeSocket == 0 {
 		return fmt.Errorf("refuse to replace non-socket path %s", socketPath)
+	}
+	if err := unixsocket.ValidateSocket(socketPath); err != nil {
+		return fmt.Errorf("refuse to replace unsafe QoS helper socket %s: %w", socketPath, err)
 	}
 	connection, dialError := net.DialTimeout("unix", socketPath, acceptInterval)
 	if dialError == nil {
