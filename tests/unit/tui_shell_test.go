@@ -126,6 +126,26 @@ func TestTUIModelExitKeysQuit(t *testing.T) {
 	}
 }
 
+func TestTUICtrlCQuitsFromEveryModalMode(t *testing.T) {
+	for _, key := range []rune{'a', 'f', 'c', 'x', 'C', 't', '?'} {
+		t.Run(string(key), func(t *testing.T) {
+			client := &tuiStatusClient{
+				status:    ipc.Status{State: "running"},
+				downloads: [][]ipc.Download{{{ID: "one", Status: "completed"}}},
+			}
+			model := loadTUIModel(t, client)
+			updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{key}})
+			_, command := updated.(tui.Model).Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+			if command == nil {
+				t.Fatalf("Ctrl+C in mode %q did not request exit", string(key))
+			}
+			if _, valid := command().(tea.QuitMsg); !valid {
+				t.Fatalf("Ctrl+C in mode %q returned a non-quit message", string(key))
+			}
+		})
+	}
+}
+
 func TestTUIModelShowsIPCUnavailableState(t *testing.T) {
 	model, err := tui.NewModel(context.Background(), &tuiStatusClient{err: errors.New("connection refused")})
 	if err != nil {

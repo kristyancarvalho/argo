@@ -138,9 +138,12 @@ func (model Model) Init() tea.Cmd {
 func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch message := message.(type) {
 	case tea.KeyMsg:
+		if message.Type == tea.KeyCtrlC {
+			return model, tea.Quit
+		}
 		if model.help {
 			switch message.String() {
-			case "q", "ctrl+c":
+			case "q":
 				return model, tea.Quit
 			case "?", "esc":
 				model.help = false
