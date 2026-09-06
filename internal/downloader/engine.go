@@ -42,15 +42,17 @@ type Engine struct {
 	observer   func(model.DownloadID, ChunkProgress)
 	parts      string
 	strict     sync.Map
+	checkpoint func(string) error
 }
 
 type Options struct {
-	HTTPClient       *http.Client
-	BytesPerSecond   int64
-	MaximumChunks    int
-	MinimumChunkSize int64
-	ChunkProgress    func(model.DownloadID, ChunkProgress)
-	PartsDirectory   string
+	HTTPClient             *http.Client
+	BytesPerSecond         int64
+	MaximumChunks          int
+	MinimumChunkSize       int64
+	ChunkProgress          func(model.DownloadID, ChunkProgress)
+	PartsDirectory         string
+	FinalizationCheckpoint func(string) error
 }
 
 func New(store Store) *Engine {
@@ -106,6 +108,7 @@ func NewWithOptions(store Store, options Options) (*Engine, error) {
 		chunkCount: options.MaximumChunks,
 		observer:   options.ChunkProgress,
 		parts:      filepath.Clean(parts),
+		checkpoint: options.FinalizationCheckpoint,
 	}
 	engine.rateLimit.Store(options.BytesPerSecond)
 
@@ -275,30 +278,14 @@ func (engine *Engine) Download(ctx context.Context, download model.Download) err
 	}
 	finalPath, err = engine.finalize(download, finalPath, partial)
 	if err != nil {
-		return engine.fail(ctx, download.ID, err)
+		return err
 	}
 	if err := partial.Close(); err != nil {
 		partialOpen = false
 		return engine.fail(ctx, download.ID, fmt.Errorf("close finalized partial file: %w", err))
 	}
 	partialOpen = false
-	filename := filepath.Base(finalPath)
-	if filename != download.Filename {
-		if err := engine.store.UpdateDownloadFilename(ctx, download.ID, filename, engine.now()); err != nil {
-			return engine.fail(ctx, download.ID, err)
-		}
-	}
-	if err := engine.store.UpdateDownloadStatus(
-		ctx,
-		download.ID,
-		model.StatusCompleted,
-		engine.now(),
-		"",
-	); err != nil {
-		return err
-	}
-
-	return nil
+	return engine.completeCurrentFinalization(ctx, download, finalPath)
 }
 
 func (engine *Engine) preparePaths(download model.Download) (int64, string, error) {

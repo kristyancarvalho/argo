@@ -52,6 +52,10 @@ type PartialCleaner interface {
 	RemovePartial(model.DownloadID) error
 }
 
+type FinalizationRecoverer interface {
+	RecoverFinalizations(context.Context, []model.Download) error
+}
+
 type CanceledResumeValidator interface {
 	ValidateCanceledResume(context.Context, model.Download) error
 }
@@ -246,10 +250,19 @@ func NewServiceWithOptions(
 	if len(profiles) > 0 && (!supportsProfiles || !controlsRate) {
 		return nil, fmt.Errorf("service dependencies cannot apply profiles")
 	}
+	downloads, err := store.Downloads(parent)
+	if err != nil {
+		return nil, err
+	}
+	if recoverer, ok := engine.(FinalizationRecoverer); ok {
+		if err := recoverer.RecoverFinalizations(parent, downloads); err != nil {
+			return nil, err
+		}
+	}
 	if err := store.RecoverActiveDownloads(parent, time.Now().UTC()); err != nil {
 		return nil, err
 	}
-	downloads, err := store.Downloads(parent)
+	downloads, err = store.Downloads(parent)
 	if err != nil {
 		return nil, err
 	}
