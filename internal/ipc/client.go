@@ -163,6 +163,10 @@ func (client *Client) Call(ctx context.Context, operation Operation, payload any
 	defer func() {
 		_ = connection.Close()
 	}()
+	stopClose := context.AfterFunc(ctx, func() {
+		_ = connection.Close()
+	})
+	defer stopClose()
 	if deadline, ok := ctx.Deadline(); ok {
 		if err := connection.SetDeadline(deadline); err != nil {
 			return fmt.Errorf("set IPC deadline: %w", err)
@@ -196,6 +200,9 @@ func (client *Client) Call(ctx context.Context, operation Operation, payload any
 	}
 	if response.Version != ProtocolVersion {
 		return fmt.Errorf("daemon uses unsupported protocol version %d", response.Version)
+	}
+	if response.ID == "" && response.Error != nil && response.Error.Code == "server_busy" {
+		return RemoteError{Code: response.Error.Code, Message: response.Error.Message}
 	}
 	if response.ID != requestID {
 		return fmt.Errorf("IPC response identifier %q does not match request %q", response.ID, requestID)

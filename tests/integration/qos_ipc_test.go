@@ -107,6 +107,50 @@ func TestQoSHelperRejectsUnauthorizedPeerBeforePayload(t *testing.T) {
 	}
 }
 
+func TestQoSHelperIdleClientDoesNotBlockConcurrentStatus(t *testing.T) {
+	backend := &recordingQoSBackend{}
+	server, cancel, finished := startQoSServer(t, backend, staticQoSAuthorizer{})
+	defer stopQoSServer(t, server, cancel, finished)
+	idle, err := net.Dial("unix", server.SocketPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = idle.Close() }()
+
+	ctx, stop := context.WithTimeout(context.Background(), time.Second)
+	defer stop()
+	started := time.Now()
+	if _, err := qosipc.NewClient(server.SocketPath()).Status(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("QoS status waited %s behind an idle client", elapsed)
+	}
+}
+
+func TestQoSHelperRejectsOversizedMessage(t *testing.T) {
+	backend := &recordingQoSBackend{}
+	server, cancel, finished := startQoSServer(t, backend, staticQoSAuthorizer{})
+	defer stopQoSServer(t, server, cancel, finished)
+	connection, err := net.Dial("unix", server.SocketPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = connection.Close() }()
+	message := make([]byte, (64*1024)+1)
+	for index := range message {
+		message[index] = 'x'
+	}
+	message = append(message, '\n')
+	if _, err := connection.Write(message); err != nil {
+		t.Fatal(err)
+	}
+	response := readQoSResponse(t, connection)
+	if response.Error == nil || response.Error.Code != "request_too_large" {
+		t.Fatalf("oversized request returned %+v", response)
+	}
+}
+
 func startQoSServer(
 	t *testing.T,
 	backend qos.Backend,
