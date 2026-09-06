@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kristyancarvalho/argo/internal/diagnostic"
 	"github.com/kristyancarvalho/argo/internal/ipc"
 	"github.com/kristyancarvalho/argo/internal/model"
 	"github.com/kristyancarvalho/argo/internal/network"
@@ -976,7 +977,7 @@ func actionResponse(identifier model.DownloadID, status model.Status) ipc.Downlo
 func downloadResponse(download model.Download) ipc.Download {
 	return ipc.Download{
 		ID:              download.ID.String(),
-		URL:             download.URL,
+		URL:             diagnostic.URL(download.URL),
 		Destination:     download.Destination,
 		Filename:        download.Filename,
 		TotalSize:       download.TotalSize,
@@ -985,7 +986,7 @@ func downloadResponse(download model.Download) ipc.Download {
 		Priority:        string(download.Priority),
 		CreatedAt:       download.CreatedAt,
 		UpdatedAt:       download.UpdatedAt,
-		Error:           download.Error,
+		Error:           diagnostic.Text(download.Error),
 	}
 }
 

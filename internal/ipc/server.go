@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/kristyancarvalho/argo/internal/diagnostic"
 )
 
 const (
@@ -199,15 +201,15 @@ func (server *Server) handleConnection(ctx context.Context, connection *net.Unix
 	if err != nil {
 		var unsupported UnsupportedOperationError
 		if errors.As(err, &unsupported) {
-			server.writeError(connection, request.ID, "unsupported_operation", err.Error())
+			server.writeError(connection, request.ID, "unsupported_operation", diagnostic.Text(err.Error()))
 			return
 		}
 		var codedError CodedError
 		if errors.As(err, &codedError) {
-			server.writeError(connection, request.ID, codedError.Code(), err.Error())
+			server.writeError(connection, request.ID, codedError.Code(), diagnostic.Text(err.Error()))
 			return
 		}
-		server.writeError(connection, request.ID, "internal_error", err.Error())
+		server.writeError(connection, request.ID, "internal_error", diagnostic.Text(err.Error()))
 		return
 	}
 	encodedResult, err := json.Marshal(result)

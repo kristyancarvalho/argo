@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/kristyancarvalho/argo/internal/diagnostic"
 	"github.com/kristyancarvalho/argo/internal/model"
 	"golang.org/x/sys/unix"
 )
@@ -78,7 +79,7 @@ func (engine *Engine) ValidateCanceledResume(ctx context.Context, download model
 	}
 	metadata, err := NewInspector(engine.httpClient).Inspect(validationContext, download.URL)
 	if err != nil {
-		return ResumeUnavailableError{ID: download.ID.String(), Reason: err.Error()}
+		return ResumeUnavailableError{ID: download.ID.String(), Reason: diagnostic.Text(err.Error())}
 	}
 	if !metadata.RangeSupported {
 		return ResumeUnavailableError{ID: download.ID.String(), Reason: "remote server no longer supports byte ranges"}
