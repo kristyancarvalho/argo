@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kristyancarvalho/argo/internal/model"
+	"github.com/kristyancarvalho/argo/internal/xdg"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -119,10 +120,14 @@ func Defaults() Config {
 }
 
 func DefaultPath() (string, error) {
-	if directory := os.Getenv("XDG_CONFIG_HOME"); directory != "" {
+	directory, configured, err := xdg.EnvironmentDirectory("XDG_CONFIG_HOME")
+	if err != nil {
+		return "", err
+	}
+	if configured {
 		return filepath.Join(directory, "argo", Filename), nil
 	}
-	home, err := os.UserHomeDir()
+	home, err := xdg.HomeDirectory()
 	if err != nil {
 		return "", fmt.Errorf("determine home directory for configuration: %w", err)
 	}

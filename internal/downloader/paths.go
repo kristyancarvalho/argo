@@ -10,18 +10,19 @@ import (
 	"strings"
 
 	"github.com/kristyancarvalho/argo/internal/model"
+	"github.com/kristyancarvalho/argo/internal/xdg"
 	"golang.org/x/sys/unix"
 )
 
 func DefaultPartsDirectory() (string, error) {
-	if state := os.Getenv("XDG_STATE_HOME"); state != "" {
-		if !filepath.IsAbs(state) {
-			return "", fmt.Errorf("XDG_STATE_HOME must be absolute")
-		}
-
+	state, configured, err := xdg.EnvironmentDirectory("XDG_STATE_HOME")
+	if err != nil {
+		return "", err
+	}
+	if configured {
 		return filepath.Join(state, "argo", "parts"), nil
 	}
-	home, err := os.UserHomeDir()
+	home, err := xdg.HomeDirectory()
 	if err != nil {
 		return "", fmt.Errorf("determine home directory for partial storage: %w", err)
 	}

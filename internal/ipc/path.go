@@ -5,10 +5,16 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+
+	"github.com/kristyancarvalho/argo/internal/xdg"
 )
 
 func DefaultSocketPath() (string, error) {
-	if runtimeDirectory := os.Getenv("XDG_RUNTIME_DIR"); runtimeDirectory != "" {
+	runtimeDirectory, configured, err := xdg.EnvironmentDirectory("XDG_RUNTIME_DIR")
+	if err != nil {
+		return "", err
+	}
+	if configured {
 		return filepath.Join(runtimeDirectory, "argo", "argod.sock"), nil
 	}
 
@@ -17,5 +23,10 @@ func DefaultSocketPath() (string, error) {
 		return "", fmt.Errorf("determine current user for runtime socket")
 	}
 
-	return filepath.Join(os.TempDir(), "argo-"+strconv.Itoa(userID), "argod.sock"), nil
+	temporaryDirectory, err := xdg.TemporaryDirectory()
+	if err != nil {
+		return "", err
+	}
+
+	return filepath.Join(temporaryDirectory, "argo-"+strconv.Itoa(userID), "argod.sock"), nil
 }
