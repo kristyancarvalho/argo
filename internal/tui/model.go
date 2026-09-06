@@ -99,6 +99,7 @@ type Model struct {
 	tick      func(time.Duration, func(time.Time) tea.Msg) tea.Cmd
 	refresh   uint64
 	pending   bool
+	confirmID string
 }
 
 type Options struct {
@@ -190,6 +191,7 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 			model.mode = inputModeCancel
+			model.confirmID = model.downloads[model.selected].ID
 			model.clearActionStatus()
 		case "x":
 			if !model.hasSelection() {
@@ -197,9 +199,11 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 			model.mode = inputModeRemove
+			model.confirmID = model.downloads[model.selected].ID
 			model.clearActionStatus()
 		case "C":
 			model.mode = inputModeClear
+			model.confirmID = ""
 			model.clearActionStatus()
 		case "R":
 			return model.dispatchSelected("retry")
@@ -283,13 +287,14 @@ func (model Model) View() string {
 		view.WriteString("\nEnter submit  Esc cancel\n")
 		return view.String()
 	}
-	if model.mode == inputModeCancel || model.mode == inputModeRemove || model.mode == inputModeClear {
+	if model.mode == inputModeClear ||
+		((model.mode == inputModeCancel || model.mode == inputModeRemove) && model.confirmID != "") {
 		prompt := "Clear completed, failed, and canceled history? y/N"
-		if model.mode == inputModeCancel && model.hasSelection() {
-			prompt = fmt.Sprintf("Cancel %s? y/N", diagnostic.Display(model.downloads[model.selected].ID))
+		if model.mode == inputModeCancel && model.confirmID != "" {
+			prompt = fmt.Sprintf("Cancel %s? y/N", diagnostic.Display(model.confirmID))
 		}
-		if model.mode == inputModeRemove && model.hasSelection() {
-			prompt = fmt.Sprintf("Remove %s from history? y/N", diagnostic.Display(model.downloads[model.selected].ID))
+		if model.mode == inputModeRemove && model.confirmID != "" {
+			prompt = fmt.Sprintf("Remove %s from history? y/N", diagnostic.Display(model.confirmID))
 		}
 		view.WriteString(console.Paint(model.color, console.Yellow, "\n"+prompt+"\n"))
 		return view.String()
@@ -537,12 +542,14 @@ func (model Model) updateConfirmation(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch message.String() {
 	case "y", "Y":
 		mode := model.mode
+		identifier := model.confirmID
 		model.mode = inputModeNone
+		model.confirmID = ""
 		switch mode {
 		case inputModeCancel:
-			return model.dispatchSelected("cancel")
+			return model.dispatchDownload("cancel", identifier)
 		case inputModeRemove:
-			return model.dispatchSelected("remove")
+			return model.dispatchDownload("remove", identifier)
 		case inputModeClear:
 			return model.dispatchClear()
 		case inputModeNone, inputModeAdd, inputModeProfile, inputModePolicy:
@@ -550,6 +557,7 @@ func (model Model) updateConfirmation(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "n", "N", "esc":
 		model.mode = inputModeNone
+		model.confirmID = ""
 	}
 
 	return model, nil
@@ -562,6 +570,18 @@ func (model Model) dispatchSelected(action string) (tea.Model, tea.Cmd) {
 	}
 	model.clearActionStatus()
 	identifier := model.downloads[model.selected].ID
+
+	return model.dispatchDownload(action, identifier)
+}
+
+func (model Model) dispatchDownload(action, identifier string) (tea.Model, tea.Cmd) {
+	if identifier == "" {
+		model.actionErr = fmt.Errorf("download confirmation is no longer valid")
+		return model, func() tea.Msg {
+			return actionResultMessage{err: model.actionErr}
+		}
+	}
+	model.clearActionStatus()
 	return model, func() tea.Msg {
 		var err error
 		switch action {
@@ -628,13 +648,20 @@ func (model Model) loadSnapshot() tea.Msg {
 }
 
 func (model *Model) applySnapshot(message snapshotMessage) {
+	selectedID := ""
+	if model.hasSelection() {
+		selectedID = model.downloads[model.selected].ID
+	}
 	model.status = message.status
 	model.downloads = append([]ipc.Download(nil), message.downloads...)
 	model.err = nil
 	model.ready = true
-	if model.selected >= len(model.downloads) && model.selected > 0 {
+	if index := model.downloadIndex(selectedID); index >= 0 {
+		model.selected = index
+	} else if model.selected >= len(model.downloads) && model.selected > 0 {
 		model.selected = len(model.downloads) - 1
 	}
+	model.validateConfirmation()
 	model.ensureVisible()
 	current := make(map[string]transferPoint, len(model.downloads))
 	currentSpeeds := make(map[string]int64, len(model.downloads))
@@ -690,6 +717,38 @@ func (model *Model) applySnapshot(message snapshotMessage) {
 	model.speeds = currentSpeeds
 	model.etas = currentETAs
 	model.previous = current
+}
+
+func (model Model) downloadIndex(identifier string) int {
+	for index, download := range model.downloads {
+		if download.ID == identifier {
+			return index
+		}
+	}
+
+	return -1
+}
+
+func (model *Model) validateConfirmation() {
+	if model.mode != inputModeCancel && model.mode != inputModeRemove {
+		return
+	}
+	index := model.downloadIndex(model.confirmID)
+	valid := index >= 0
+	if valid && model.mode == inputModeCancel {
+		valid = model.downloads[index].Status != "completed" && model.downloads[index].Status != "canceled"
+	}
+	if valid && model.mode == inputModeRemove {
+		status := model.downloads[index].Status
+		valid = status == "completed" || status == "failed" || status == "canceled"
+	}
+	if valid {
+		return
+	}
+	identifier := model.confirmID
+	model.confirmID = ""
+	model.notice = ""
+	model.actionErr = fmt.Errorf("confirmation canceled: download %s is no longer eligible", diagnostic.Display(identifier))
 }
 
 func (model *Model) scheduleRefresh(delay time.Duration) tea.Cmd {
