@@ -8,6 +8,7 @@ import (
 
 	"github.com/kristyancarvalho/argo/internal/diagnostic"
 	"github.com/kristyancarvalho/argo/internal/ipc"
+	"github.com/kristyancarvalho/argo/internal/telemetry"
 )
 
 const (
@@ -207,6 +208,10 @@ func downloadMetrics(
 	remaining := download.TotalSize - download.DownloadedBytes
 	candidate := float64(remaining) / current.smoothed
 	if !current.etaVisible || timestamp.Sub(current.etaUpdated) >= etaDelay {
+		if _, valid := telemetry.DurationForSeconds(candidate); !valid {
+			current.etaVisible = false
+			return speed, nil, current
+		}
 		current.visibleETA = candidate
 		current.etaVisible = true
 		current.etaUpdated = timestamp
@@ -253,7 +258,9 @@ func renderWatchSnapshot(output io.Writer, snapshot WatchSnapshot) error {
 	for _, download := range snapshot.Downloads {
 		eta := "unknown"
 		if download.ETASeconds != nil {
-			eta = time.Duration(*download.ETASeconds * float64(time.Second)).Round(time.Second).String()
+			if duration, valid := telemetry.DurationForSeconds(*download.ETASeconds); valid {
+				eta = duration.Round(time.Second).String()
+			}
 		}
 		if _, err := fmt.Fprintf(
 			output,

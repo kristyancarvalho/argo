@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -294,6 +295,27 @@ func TestTUIDownloadListCalculatesSpeedAndETA(t *testing.T) {
 	view := updated.(tui.Model).View()
 	if !strings.Contains(view, "/s") || strings.Contains(view, "Argo throughput: --") || strings.Contains(view, "speed.bin      1.0KB/10.0KB    --") {
 		t.Fatalf("speed and ETA were not rendered: %q", view)
+	}
+}
+
+func TestTUILargeETAIsUnknownInsteadOfNegative(t *testing.T) {
+	client := &tuiStatusClient{
+		status: ipc.Status{State: "running"},
+		downloads: [][]ipc.Download{
+			{{ID: "large", Filename: "large", TotalSize: math.MaxInt64, Status: "downloading"}},
+			{{ID: "large", Filename: "large", DownloadedBytes: 1, TotalSize: math.MaxInt64, Status: "downloading"}},
+			{{ID: "large", Filename: "large", DownloadedBytes: 2, TotalSize: math.MaxInt64, Status: "downloading"}},
+		},
+	}
+	model := loadTUIModel(t, client)
+	for range 2 {
+		time.Sleep(5 * time.Millisecond)
+		updated, _ := model.Update(model.Init()())
+		model = updated.(tui.Model)
+	}
+	view := model.View()
+	if strings.Contains(view, "-2562047") || !strings.Contains(view, "-- downloading") {
+		t.Fatalf("large ETA was not rendered as unknown: %q", view)
 	}
 }
 
