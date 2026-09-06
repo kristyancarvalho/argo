@@ -75,7 +75,7 @@ func TestDaemonExecutableLifecycle(t *testing.T) {
 	tuiContext, stopTUI := context.WithTimeout(ctx, 3*time.Second)
 	tuiCommand := exec.CommandContext(tuiContext, clientBinary, "tui")
 	tuiCommand.Env = environment
-	tuiCommand.Stdin = strings.NewReader("q")
+	tuiCommand.Stdin = strings.NewReader("a\x03")
 	var tuiOutput bytes.Buffer
 	tuiCommand.Stdout = &tuiOutput
 	tuiCommand.Stderr = &tuiOutput
@@ -86,6 +86,9 @@ func TestDaemonExecutableLifecycle(t *testing.T) {
 	stopTUI()
 	if !strings.Contains(tuiOutput.String(), "Argo") {
 		t.Fatalf("TUI output does not contain application title: %q", tuiOutput.String())
+	}
+	if !strings.Contains(tuiOutput.String(), "\x1b[?1049l") {
+		t.Fatalf("TUI did not restore the terminal after modal Ctrl+C: %q", tuiOutput.String())
 	}
 	status, err := client.Status(ctx)
 	if err != nil || status.State != "running" {
