@@ -32,6 +32,7 @@ func Run(ctx context.Context, client Client, output io.Writer, arguments []strin
 }
 
 func RunWithOptions(ctx context.Context, client Client, output io.Writer, arguments []string, options Options) error {
+	terminalOutput := output
 	if options.Color {
 		output = styledWriter{output: output}
 	}
@@ -65,7 +66,7 @@ func RunWithOptions(ctx context.Context, client Client, output io.Writer, argume
 	case "priority":
 		return runPriority(ctx, client, output, operands)
 	case "watch":
-		return runWatch(ctx, client, output, operands, options.Interactive)
+		return runWatch(ctx, client, output, terminalOutput, operands, options)
 	case "status":
 		return runStatus(ctx, client, output, operands)
 	case "profile":
@@ -277,13 +278,20 @@ func runAction(
 	return err
 }
 
-func runWatch(ctx context.Context, client Client, output io.Writer, arguments []string, interactive bool) error {
+func runWatch(
+	ctx context.Context,
+	client Client,
+	output io.Writer,
+	terminalOutput io.Writer,
+	arguments []string,
+	options Options,
+) error {
 	if len(arguments) != 0 {
 		return UsageError{Message: "argo watch"}
 	}
 
 	watcher := NewWatcher(client)
-	if !interactive {
+	if !options.Interactive {
 		snapshot, err := watcher.Snapshot(ctx)
 		if err != nil {
 			return err
@@ -291,7 +299,11 @@ func runWatch(ctx context.Context, client Client, output io.Writer, arguments []
 
 		return renderWatchSnapshot(output, snapshot)
 	}
-	renderer := newWatchRegionRenderer(output)
+	size := options.TerminalSize
+	if size == nil {
+		size = watchTerminalSize(terminalOutput)
+	}
+	renderer := newWatchRegionRenderer(output, size)
 	err := watcher.Stream(ctx, renderer.Render)
 	if errors.Is(err, context.Canceled) {
 		return nil
