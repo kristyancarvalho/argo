@@ -2,16 +2,21 @@ package storage
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
+
+	"github.com/kristyancarvalho/argo/internal/xdg"
 )
 
 func DefaultPath() (string, error) {
-	if dataDirectory := os.Getenv("XDG_DATA_HOME"); dataDirectory != "" {
+	dataDirectory, configured, err := xdg.EnvironmentDirectory("XDG_DATA_HOME")
+	if err != nil {
+		return "", err
+	}
+	if configured {
 		return filepath.Join(dataDirectory, "argo", "argo.db"), nil
 	}
 
-	homeDirectory, err := os.UserHomeDir()
+	homeDirectory, err := xdg.HomeDirectory()
 	if err != nil {
 		return "", fmt.Errorf("determine home directory for database: %w", err)
 	}
