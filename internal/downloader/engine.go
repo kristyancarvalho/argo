@@ -174,6 +174,16 @@ func (engine *Engine) Download(ctx context.Context, download model.Download) err
 		}
 	}
 
+	states, err := engine.store.DownloadChunks(ctx, download.ID)
+	if err != nil {
+		return engine.fail(ctx, download.ID, err)
+	}
+	if len(states) > 0 {
+		if err := engine.store.ResetDownloadProgress(ctx, download.ID, engine.now()); err != nil {
+			return engine.fail(ctx, download.ID, err)
+		}
+		download.DownloadedBytes = 0
+	}
 	offset, finalPath, err := engine.preparePaths(download)
 	if err != nil {
 		return engine.fail(ctx, download.ID, err)

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -88,6 +89,59 @@ func TestResumeRequiresByteCompatibleValidator(t *testing.T) {
 			last := ranges[len(ranges)-1]
 			if test.reuse && last != "bytes=4-" || !test.reuse && last != "" {
 				t.Fatalf("unexpected transfer range %q", last)
+			}
+		})
+	}
+}
+
+func TestParallelResumeWithSerialPlan(t *testing.T) {
+	for _, maximum := range []int{1, 4} {
+		t.Run(fmt.Sprint(maximum), func(t *testing.T) {
+			ctx := context.Background()
+			payload := []byte("AAAABBBB")
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				writer.Header().Set("ETag", `"same"`)
+				http.ServeContent(writer, request, "file.bin", time.Time{}, bytes.NewReader(payload))
+			}))
+			defer server.Close()
+			store := openTestStore(t)
+			download := persistedDownload(t, store, server.URL, t.TempDir(), "file.bin")
+			for _, err := range []error{
+				store.UpdateRemoteMetadata(ctx, download.ID, 8, true, `"same"`, "", time.Now()),
+				store.UpdateDownloadStatus(ctx, download.ID, model.StatusDownloading, time.Now(), ""),
+				store.ReplaceDownloadChunks(ctx, download.ID, []model.DownloadChunk{
+					{DownloadID: download.ID, Index: 0, Start: 0, End: 3},
+					{DownloadID: download.ID, Index: 1, Start: 4, End: 7, DownloadedBytes: 4},
+				}, time.Now()),
+			} {
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			download, err := store.Download(ctx, download.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			parts := t.TempDir()
+			if err := os.WriteFile(filepath.Join(parts, download.ID.String()+".part"), []byte("\x00\x00\x00\x00BBBB"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			engine, err := downloader.NewWithOptions(store, downloader.Options{MaximumChunks: maximum, MinimumChunkSize: 16, PartsDirectory: parts})
+			if err != nil {
+				t.Fatal(err)
+			}
+			canceled := download
+			canceled.Status = model.StatusCanceled
+			if err := engine.ValidateCanceledResume(ctx, canceled); err != nil {
+				t.Fatal(err)
+			}
+			if err := engine.Download(ctx, download); err != nil {
+				t.Fatal(err)
+			}
+			assertCompletedDownload(t, store, download, payload)
+			chunks, err := store.DownloadChunks(ctx, download.ID)
+			if err != nil || len(chunks) != 0 {
+				t.Fatalf("serial transfer retained chunk metadata: %+v, %v", chunks, err)
 			}
 		})
 	}
