@@ -13,7 +13,8 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "build": "npm run sync:branding && astro build",
+    "build": "npm run sync:branding && astro build && npm run validate:build",
+    "validate:build": "node scripts/validate-build.mjs",
     "preview": "astro preview"
   },
   "dependencies": {
