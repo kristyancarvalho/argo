@@ -1,0 +1,6 @@
+dist/
+.astro/
+node_modules/
+public/branding/
+public/favicon.svg
+package-lock.json

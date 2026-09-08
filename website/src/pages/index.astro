@@ -1,0 +1,59 @@
+---
+import SiteLayout from "../layouts/SiteLayout.astro";
+import { project } from "../data/project";
+---
+
+<SiteLayout>
+  <main>
+    <section class="foundation" aria-labelledby="foundation-title">
+      <img src="/branding/logo/argo-logo-horizontal.svg" alt="Argo" width="325" height="100" />
+      <p>{project.status} · {project.version}</p>
+      <h1 id="foundation-title">{project.tagline}</h1>
+      <p>{project.description}</p>
+      <a href={project.repository}>View Argo on GitHub</a>
+    </section>
+  </main>
+</SiteLayout>
+
+<style>
+  main {
+    display: grid;
+    min-height: 100vh;
+    place-items: center;
+    padding: 2rem;
+  }
+
+  .foundation {
+    width: min(100%, 54rem);
+    padding: clamp(2rem, 7vw, 5rem);
+    border: 1px solid var(--argo-border);
+    border-radius: var(--argo-radius-lg);
+    background: var(--argo-surface);
+    box-shadow: var(--argo-shadow);
+  }
+
+  img {
+    width: min(20rem, 100%);
+    height: auto;
+  }
+
+  h1 {
+    margin: 2rem 0 1rem;
+    font-family: var(--argo-font-display);
+    font-size: clamp(3rem, 10vw, 7rem);
+    font-weight: 400;
+    letter-spacing: -0.06em;
+    line-height: 0.9;
+  }
+
+  p {
+    color: var(--argo-text-muted);
+    font-size: 1.1rem;
+  }
+
+  a {
+    display: inline-block;
+    margin-top: 1rem;
+    color: var(--argo-blue-400);
+  }
+</style>
