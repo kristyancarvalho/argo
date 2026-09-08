@@ -110,6 +110,24 @@ func TestBrandingPNGExportsHaveExpectedDimensions(t *testing.T) {
 	}
 }
 
+func TestBannerDisplayTypographyIsPortableVectorGeometry(t *testing.T) {
+	for _, name := range []string{"argo-banner.svg", "argo-social-preview.svg"} {
+		content, err := os.ReadFile(filepath.Join(brandingRoot(t), "banner", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		value := string(content)
+		if strings.Contains(value, "<text") || strings.Contains(value, "font-family") {
+			t.Fatalf("%s depends on locally installed fonts", name)
+		}
+		for _, expected := range []string{"Control the flow", "DejaVu Serif", "-glyph-", "<use href="} {
+			if !strings.Contains(value, expected) {
+				t.Errorf("%s does not contain portable display typography evidence %q", name, expected)
+			}
+		}
+	}
+}
+
 func TestBrandingWidgetsProvideTextPadding(t *testing.T) {
 	type geometry struct {
 		width int
