@@ -1,0 +1,238 @@
+---
+import { project } from "../../data/project";
+import Icon from "../Icon.astro";
+import NetworkFlow from "./NetworkFlow.astro";
+---
+
+<section class="hero" aria-labelledby="hero-title">
+  <div class="hero-stage">
+    <div class="hero-copy">
+      <h1 id="hero-title">Control<br />the flow.</h1>
+      <p class="lede">
+        A persistent download manager that understands the network around it. Schedule transfers,
+        recover safely, and govern traffic from the terminal.
+      </p>
+      <div class="actions">
+        <a class="primary" href="/docs/getting-started/"
+          >Get started<Icon name="arrow-right" size={17} /></a
+        >
+        <a class="secondary" href={project.repository}
+          ><Icon name="github" size={17} />View on GitHub</a
+        >
+      </div>
+    </div>
+    <NetworkFlow />
+    <div class="control-rail" role="group" aria-label="Argo control plane capabilities">
+      <p><Icon name="activity" size={18} /><span>Control plane</span></p>
+      <span class="rail-line" aria-hidden="true"></span>
+      <div><Icon name="server" /><small>daemon</small><strong>persistent</strong></div>
+      <div><Icon name="network" /><small>network</small><strong>aware</strong></div>
+      <div><Icon name="route" /><small>policy</small><strong>selectable</strong></div>
+      <div><Icon name="terminal" /><small>control</small><strong>terminal first</strong></div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .hero {
+    position: relative;
+    overflow: hidden;
+    background:
+      linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--argo-blue-950) 88%, transparent),
+        transparent 70%
+      ),
+      radial-gradient(circle at 74% 48%, var(--argo-blue-500), transparent 32%),
+      linear-gradient(135deg, var(--argo-blue-700), var(--argo-blue-950));
+    isolation: isolate;
+  }
+  .hero-stage {
+    position: relative;
+    display: grid;
+    width: min(100%, 112rem);
+    min-height: min(52rem, calc(100vh - 5.25rem));
+    grid-template-columns: minmax(20rem, 0.88fr) minmax(30rem, 1.12fr);
+    margin: 0 auto;
+    padding: clamp(3rem, 5vw, 5.5rem) clamp(1.25rem, 4vw, 4rem);
+  }
+  .hero::before {
+    position: absolute;
+    z-index: -1;
+    inset: 0;
+    background-image:
+      linear-gradient(
+        color-mix(in srgb, var(--argo-blue-100) 6%, transparent) 1px,
+        transparent 1px
+      ),
+      linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--argo-blue-100) 6%, transparent) 1px,
+        transparent 1px
+      );
+    background-size: 3rem 3rem;
+    content: "";
+    mask-image: linear-gradient(to bottom, black, transparent 78%);
+  }
+  .hero-copy {
+    position: relative;
+    z-index: 3;
+    align-self: center;
+    padding-bottom: 5.5rem;
+    animation: copy-enter 700ms ease-out both;
+  }
+  h1 {
+    max-width: 8ch;
+    margin: 0;
+    font-family: var(--argo-font-display);
+    font-size: clamp(4.7rem, 9.4vw, 9.2rem);
+    font-weight: 400;
+    letter-spacing: -0.075em;
+    line-height: 0.77;
+  }
+  .lede {
+    max-width: 35rem;
+    margin: 2.25rem 0 0;
+    color: var(--argo-blue-100);
+    font-size: clamp(1rem, 1.4vw, 1.2rem);
+    line-height: 1.6;
+  }
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 2rem;
+  }
+  .actions a {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.85rem 1.15rem;
+    border-radius: var(--argo-radius-sm);
+    font-size: 0.9rem;
+    font-weight: 750;
+    text-decoration: none;
+  }
+  .primary {
+    color: var(--argo-blue-950);
+    background: var(--argo-text);
+  }
+  .secondary {
+    border: 1px solid color-mix(in srgb, var(--argo-blue-100) 45%, transparent);
+    background: color-mix(in srgb, var(--argo-blue-950) 35%, transparent);
+  }
+  .control-rail {
+    position: absolute;
+    right: clamp(1.25rem, 4vw, 4rem);
+    bottom: clamp(1.25rem, 3vw, 2.5rem);
+    left: clamp(1.25rem, 4vw, 4rem);
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    gap: clamp(0.85rem, 2.5vw, 2.5rem);
+    min-height: 4.25rem;
+    padding: 0.8rem 1rem;
+    border-block: 1px solid color-mix(in srgb, var(--argo-blue-100) 28%, transparent);
+    background: color-mix(in srgb, var(--argo-blue-950) 64%, transparent);
+    backdrop-filter: blur(0.8rem);
+  }
+  .control-rail > p,
+  .control-rail > div {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0;
+  }
+  .control-rail > p {
+    color: var(--argo-blue-400);
+    font-family: var(--argo-font-mono);
+    font-size: 0.66rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  .rail-line {
+    height: 1px;
+    flex: 1 1 5rem;
+    background: linear-gradient(90deg, var(--argo-blue-400), transparent);
+  }
+  .control-rail small {
+    color: var(--argo-blue-200);
+    font-family: var(--argo-font-mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .control-rail strong {
+    font-size: 0.78rem;
+    white-space: nowrap;
+  }
+  .control-rail > div :global(svg) {
+    color: var(--argo-blue-400);
+    transition: transform 180ms ease;
+  }
+  .control-rail > div:hover :global(svg) {
+    transform: translateY(-0.15rem);
+  }
+  @keyframes copy-enter {
+    from {
+      opacity: 0;
+      transform: translateY(1rem);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @media (max-width: 65rem) {
+    .hero-stage {
+      grid-template-columns: 1fr;
+      padding-bottom: 2rem;
+    }
+    .hero-copy {
+      padding-bottom: 0;
+    }
+    .control-rail {
+      position: relative;
+      right: auto;
+      bottom: auto;
+      left: auto;
+      grid-column: 1;
+      flex-wrap: wrap;
+      margin-top: 1.5rem;
+    }
+    .rail-line {
+      flex-basis: 40%;
+    }
+  }
+  @media (max-width: 38rem) {
+    .hero-stage {
+      min-height: 0;
+      grid-template-columns: minmax(0, 1fr);
+      padding: 3rem 1.25rem 1.25rem;
+    }
+    h1 {
+      font-size: clamp(4rem, 22vw, 6rem);
+    }
+    .control-rail {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .control-rail > p,
+    .rail-line {
+      grid-column: 1 / -1;
+    }
+    .control-rail > div {
+      display: grid;
+      grid-template-columns: auto 1fr;
+    }
+    .control-rail > div :global(svg) {
+      grid-row: 1 / 3;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .hero-copy {
+      animation: none;
+    }
+  }
+</style>

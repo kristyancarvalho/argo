@@ -1,0 +1,42 @@
+---
+title: Troubleshooting
+description: Diagnose daemon, path, resume, NetworkManager, traffic policy, and terminal behavior.
+---
+
+## The CLI cannot reach the daemon
+
+Run `argo status`. If the Unix socket is unavailable, start the source daemon with `make run` or the installed user service with `systemctl --user start argod.service`. Verify that `XDG_RUNTIME_DIR` is absolute and owned by your user.
+
+Do not run the CLI and daemon as different users. Argo rejects peers outside the authorized user boundary.
+
+## Configuration fails at startup
+
+Argo rejects unknown TOML fields, relative XDG directories, relative download destinations, invalid rates, nonpositive concurrency, unknown priorities, and unsupported policies. The error names the failing field. Correct the file and restart `argod`.
+
+## A canceled download will not resume
+
+Resume needs an existing safe partial file and compatible remote Range behavior. A changed ETag, changed Last-Modified value, representation encoding, truncated state, or server that ignores the requested range makes the old state unsafe. Run `argo retry <id>` to create a fresh transfer instead.
+
+## Traffic policy is selected but inactive
+
+Check `argo status` for each prerequisite:
+
+- an active download
+- a connected interface reported by NetworkManager
+- nonzero `qos.link_rate`
+- a running `argo-qosd` service for the same user
+- available cgroup v2, nftables, IFB, and `tc` support
+
+The selected policy and applied kernel state are reported separately. Ordinary downloads continue when the helper is unavailable.
+
+## No latency measurement appears
+
+Set `qos.probe_target` to a stable reachable `host:port`, or configure a positive manual baseline. An empty probe target deliberately disables active TCP-connect sampling.
+
+## Watch or TUI colors are unsuitable
+
+Set `NO_COLOR=1` for plain CLI output. `argo watch` redraws only when attached to a TTY and prints a single snapshot when piped. If a TUI session is interrupted, Ctrl+C should restore the terminal; report the terminal type and dimensions if it does not.
+
+## Collect useful diagnostics
+
+Include the Argo version, Linux distribution, kernel, NetworkManager version, command, expected and actual behavior, and reproducible steps. Redact credentials before sharing logs. Argo itself removes URL user information and query secrets from routine diagnostics, but copied shell history may still contain the original URL.

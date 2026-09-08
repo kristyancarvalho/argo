@@ -1,0 +1,166 @@
+---
+import Icon from "../Icon.astro";
+---
+
+<section class="features" aria-labelledby="features-title" data-reveal>
+  <header>
+    <p>02 / Built for the route</p>
+    <h2 id="features-title">Reliable transfer.<br /><em>Deliberate traffic.</em></h2>
+  </header>
+  <div class="feature-grid">
+    <article>
+      <p class="number">01</p><div>
+        <h3><Icon name="database" />Persistent recovery</h3><p>
+          Pause, resume, cancel, retry, and recover transfers across daemon restarts. Validators and
+          partial state protect file integrity.
+        </p>
+      </div>
+    </article>
+    <article>
+      <p class="number">02</p><div>
+        <h3><Icon name="route" />Intentional scheduling</h3><p>
+          Bounded concurrency and stable high, normal, and low queue priorities keep parallel work
+          predictable.
+        </p>
+      </div>
+    </article>
+    <article>
+      <p class="number">03</p><div>
+        <h3><Icon name="network" />Network awareness</h3><p>
+          NetworkManager state, metered-link behavior, and profiles adapt download decisions to the
+          active connection.
+        </p>
+      </div>
+    </article>
+    <article class="governance">
+      <p class="number">04</p><div>
+        <h3><Icon name="shield" />Linux traffic governance</h3><p>
+          An optional capability-limited helper coordinates cgroups, conntrack, nftables, IFB, and <code
+            >tc</code
+          > without making the downloader daemon root.
+        </p>
+      </div>
+      <div
+        class="policy-scale"
+        role="list"
+        aria-label="Available traffic policies: off, focus, balanced, throughput, latency"
+      >
+        <span role="listitem">off</span><span role="listitem">focus</span><span role="listitem"
+          >balanced</span
+        ><span role="listitem">throughput</span><span role="listitem">latency</span>
+      </div>
+    </article>
+  </div>
+</section>
+
+<style>
+  .features {
+    padding: clamp(4rem, 9vw, 8rem) var(--argo-section-gutter);
+    border-block: 1px solid var(--argo-border);
+    background: var(--argo-surface);
+  }
+  header {
+    display: grid;
+    grid-template-columns: 0.45fr 1.55fr;
+    gap: 2rem;
+    margin-bottom: clamp(3rem, 7vw, 6rem);
+  }
+  header p,
+  .number {
+    color: var(--argo-blue-400);
+    font-family: var(--argo-font-mono);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  h2 {
+    margin: 0;
+    font-family: var(--argo-font-display);
+    font-size: clamp(3rem, 6vw, 5.8rem);
+    font-weight: 400;
+    letter-spacing: -0.055em;
+    line-height: 0.92;
+  }
+  h2 em {
+    color: var(--argo-blue-400);
+    font-weight: 400;
+  }
+  .feature-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    border-top: 1px solid var(--argo-border);
+    border-left: 1px solid var(--argo-border);
+  }
+  article {
+    display: grid;
+    min-height: 19rem;
+    grid-template-columns: 3rem 1fr;
+    gap: 1rem;
+    align-content: space-between;
+    padding: clamp(1.5rem, 4vw, 3rem);
+    border-right: 1px solid var(--argo-border);
+    border-bottom: 1px solid var(--argo-border);
+  }
+  article:nth-child(2),
+  article:nth-child(3) {
+    background: var(--argo-surface-raised);
+  }
+  article div {
+    align-self: end;
+  }
+  h3 {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    margin: 0 0 1rem;
+    font-size: clamp(1.4rem, 2.3vw, 2.2rem);
+    letter-spacing: -0.03em;
+  }
+  h3 :global(svg) {
+    flex: 0 0 auto;
+    color: var(--argo-blue-400);
+  }
+  article div > p {
+    max-width: 35rem;
+    margin: 0;
+    color: var(--argo-text-muted);
+    line-height: 1.65;
+  }
+  .governance {
+    position: relative;
+    grid-template-rows: 1fr auto;
+    background: var(--argo-blue-950);
+  }
+  .policy-scale {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(5, auto);
+    gap: 0.35rem;
+    align-self: end;
+    margin-top: 2rem;
+  }
+  .policy-scale span {
+    padding: 0.45rem;
+    border: 1px solid var(--argo-border);
+    border-radius: 10rem;
+    color: var(--argo-text-muted);
+    font-family: var(--argo-font-mono);
+    font-size: 0.62rem;
+    text-align: center;
+  }
+  @media (max-width: 50rem) {
+    header,
+    .feature-grid {
+      grid-template-columns: 1fr;
+    }
+    article {
+      min-height: 16rem;
+    }
+  }
+  @media (max-width: 32rem) {
+    .policy-scale {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+</style>

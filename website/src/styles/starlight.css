@@ -1,0 +1,102 @@
+@import "./tokens.css";
+
+:root {
+  --sl-font: var(--argo-font-sans);
+  --sl-font-mono: var(--argo-font-mono);
+  --sl-color-accent-low: var(--argo-blue-950);
+  --sl-color-accent: var(--argo-blue-500);
+  --sl-color-accent-high: var(--argo-blue-100);
+  --sl-color-white: var(--argo-text);
+  --sl-color-gray-1: var(--argo-blue-100);
+  --sl-color-gray-2: var(--argo-text-muted);
+  --sl-color-gray-3: var(--argo-border);
+  --sl-color-gray-4: var(--argo-surface-raised);
+  --sl-color-gray-5: var(--argo-surface);
+  --sl-color-gray-6: var(--argo-background);
+  --sl-color-black: var(--argo-background);
+  --sl-color-bg: var(--argo-background);
+  --sl-color-bg-nav: var(--argo-surface);
+  --sl-color-bg-sidebar: var(--argo-surface);
+  --sl-color-hairline: var(--argo-border);
+  --sl-color-hairline-light: var(--argo-border);
+}
+
+body {
+  background: var(--sl-color-bg);
+}
+.main-pane,
+.content-panel,
+.right-sidebar {
+  background-color: var(--sl-color-bg);
+}
+.site-title img {
+  width: auto;
+  height: 2.35rem;
+}
+.content-panel + .content-panel {
+  border-top-color: var(--argo-border);
+}
+.sl-markdown-content h1,
+.sl-markdown-content h2 {
+  font-family: var(--argo-font-display);
+  font-weight: 400;
+  letter-spacing: -0.035em;
+}
+.sl-markdown-content h1 {
+  font-size: clamp(2.7rem, 7vw, 4.7rem);
+  line-height: 0.95;
+}
+.sl-markdown-content a:not([class]) {
+  text-decoration-color: var(--argo-blue-500);
+  text-underline-offset: 0.2em;
+}
+.expressive-code {
+  --ec-brdRad: var(--argo-radius-sm);
+}
+
+:root[data-theme="light"],
+[data-theme="light"] ::backdrop {
+  --sl-color-accent-low: var(--argo-blue-100);
+  --sl-color-accent: var(--argo-blue-600);
+  --sl-color-accent-high: var(--argo-blue-700);
+  --sl-color-bg: var(--argo-blue-50);
+  --sl-color-bg-nav: var(--argo-blue-50);
+  --sl-color-bg-sidebar: var(--argo-blue-50);
+  --sl-color-bg-inline-code: var(--argo-blue-100);
+  --sl-color-bg-accent: var(--argo-blue-600);
+  --sl-color-text-accent: var(--argo-blue-600);
+  --sl-color-text-invert: var(--argo-blue-50);
+  --sl-color-white: var(--argo-blue-950);
+  --sl-color-gray-1: var(--argo-blue-950);
+  --sl-color-gray-2: var(--argo-blue-700);
+  --sl-color-gray-3: var(--argo-blue-200);
+  --sl-color-gray-4: var(--argo-blue-100);
+  --sl-color-gray-5: var(--argo-blue-50);
+  --sl-color-gray-6: var(--argo-text);
+  --sl-color-black: var(--argo-text);
+  --sl-color-hairline: var(--argo-blue-200);
+  --sl-color-hairline-light: var(--argo-blue-100);
+  --sl-color-hairline-shade: var(--argo-blue-100);
+}
+
+site-search dialog {
+  height: max-content;
+  min-height: 0;
+  max-height: 100%;
+  border-color: var(--sl-color-hairline);
+  background-color: var(--sl-color-bg-nav);
+}
+site-search .dialog-frame {
+  flex-grow: 0;
+}
+#starlight__search .pagefind-ui__search-input::placeholder {
+  color: var(--sl-color-gray-2);
+  opacity: 0.72;
+}
+
+@media (min-width: 50rem) {
+  site-search dialog {
+    max-height: calc(100% - 8rem);
+    border-radius: var(--argo-radius-md);
+  }
+}

@@ -4,3 +4,8 @@
 *.db
 *.db-shm
 *.db-wal
+/website/dist/
+/website/node_modules/
+/website/.astro/
+/website/public/branding/
+/website/public/favicon.svg

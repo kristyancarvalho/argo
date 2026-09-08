@@ -1,0 +1,57 @@
+---
+import { project } from "../data/project";
+---
+
+<footer class="site-footer">
+  <div class="footer-inner">
+    <div>
+      <img src="/branding/logo/argo-logo-mark.svg" alt="" width="32" height="32" />
+      <p><strong>{project.name}</strong> carries downloads across a governed route.</p>
+    </div>
+    <nav aria-label="Footer navigation">
+      <a href="/docs/">Documentation</a>
+      <a href="/changelog/">Changelog</a>
+      <a href={`${project.repository}/blob/main/LICENSE`}>{project.license}</a>
+    </nav>
+  </div>
+</footer>
+
+<style>
+  .site-footer {
+    border-top: 1px solid var(--argo-border);
+    background: var(--argo-surface);
+    color: var(--argo-text-muted);
+    font-size: 0.85rem;
+  }
+  .footer-inner {
+    display: flex;
+    width: min(100%, 112rem);
+    align-items: center;
+    justify-content: space-between;
+    gap: 2rem;
+    margin: 0 auto;
+    padding: 2rem clamp(1rem, 4vw, 4rem);
+  }
+  .site-footer div,
+  .site-footer nav {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+  .site-footer p {
+    margin: 0;
+  }
+  .site-footer a {
+    text-decoration: none;
+  }
+  .site-footer a:hover {
+    color: var(--argo-text);
+  }
+  @media (max-width: 45rem) {
+    .footer-inner,
+    .site-footer nav {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+  }
+</style>

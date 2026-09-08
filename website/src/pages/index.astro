@@ -1,0 +1,133 @@
+---
+import Footer from "../components/Footer.astro";
+import Header from "../components/Header.astro";
+import Icon from "../components/Icon.astro";
+import Architecture from "../components/home/Architecture.astro";
+import Features from "../components/home/Features.astro";
+import Hero from "../components/home/Hero.astro";
+import ProjectStatus from "../components/home/ProjectStatus.astro";
+import TerminalPreview from "../components/home/TerminalPreview.astro";
+import { project } from "../data/project";
+import SiteLayout from "../layouts/SiteLayout.astro";
+---
+
+<SiteLayout title={project.name} description={project.description}>
+  <a class="skip-link" href="#content">Skip to content</a>
+  <Header />
+  <main id="content">
+    <Hero />
+    <TerminalPreview />
+    <Features />
+    <Architecture />
+    <ProjectStatus />
+    <section class="final-cta" aria-labelledby="final-cta-title" data-reveal>
+      <img src="/branding/logo/argo-logo-mark.svg" alt="" width="88" height="88" />
+      <p>Ready to chart the route?</p>
+      <h2 id="final-cta-title">Start with the daemon.<br />Stay for the control.</h2>
+      <div>
+        <a href="/docs/"><Icon name="book" size={18} />Read the documentation</a><a
+          href={project.repository}><Icon name="github" size={18} />Explore the source</a
+        >
+      </div>
+    </section>
+  </main>
+  <Footer />
+</SiteLayout>
+
+<script>
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  if (!reducedMotion.matches && "IntersectionObserver" in window) {
+    document.documentElement.classList.add("reveal-ready");
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          entry.target.classList.add("is-visible");
+          observer.unobserve(entry.target);
+        }
+      },
+      { rootMargin: "0px 0px -8%", threshold: 0.08 },
+    );
+    document.querySelectorAll("[data-reveal]").forEach((section) => observer.observe(section));
+  }
+</script>
+
+<style>
+  .skip-link {
+    position: fixed;
+    z-index: 100;
+    top: 1rem;
+    left: 1rem;
+    padding: 0.7rem 1rem;
+    border-radius: var(--argo-radius-sm);
+    color: var(--argo-blue-950);
+    background: var(--argo-text);
+    transform: translateY(-200%);
+  }
+  .skip-link:focus {
+    transform: translateY(0);
+  }
+  .final-cta {
+    display: grid;
+    place-items: center;
+    padding: clamp(5rem, 12vw, 11rem) 1.25rem;
+    text-align: center;
+    background:
+      radial-gradient(circle at 50% 20%, var(--argo-blue-600), transparent 35%),
+      var(--argo-blue-950);
+  }
+  .final-cta img {
+    width: 4rem;
+    height: 4rem;
+    margin-bottom: 2rem;
+  }
+  .final-cta p {
+    color: var(--argo-blue-400);
+    font-family: var(--argo-font-mono);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  .final-cta h2 {
+    margin: 1rem 0 2rem;
+    font-family: var(--argo-font-display);
+    font-size: clamp(3rem, 7vw, 6.5rem);
+    font-weight: 400;
+    letter-spacing: -0.06em;
+    line-height: 0.9;
+  }
+  .final-cta div {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.75rem;
+  }
+  .final-cta a {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.85rem 1.1rem;
+    border: 1px solid var(--argo-border);
+    border-radius: var(--argo-radius-sm);
+    font-weight: 700;
+    text-decoration: none;
+  }
+  .final-cta a:first-child {
+    color: var(--argo-blue-950);
+    background: var(--argo-text);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    :global(.reveal-ready [data-reveal]) {
+      opacity: 0;
+      transform: translateY(1.5rem);
+      transition:
+        opacity 600ms ease,
+        transform 600ms ease;
+    }
+    :global(.reveal-ready [data-reveal].is-visible) {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+</style>
