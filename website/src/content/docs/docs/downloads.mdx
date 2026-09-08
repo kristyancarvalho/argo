@@ -1,0 +1,61 @@
+---
+title: Download lifecycle and terminal tools
+description: Add, inspect, pause, resume, retry, prioritize, watch, and remove Argo transfers.
+---
+
+## Historical identity
+
+Every request receives a new download ID. A completed record remains immutable history: retrying it creates a new ID and resolves destination filename collisions without overwriting the prior file.
+
+| Operation     | Identity                      | Partial data                                               |
+| ------------- | ----------------------------- | ---------------------------------------------------------- |
+| `resume <id>` | Preserves the existing ID     | Revalidates and continues safe partial state               |
+| `retry <id>`  | Creates a new ID              | Starts a clean transfer from the historical URL            |
+| `remove <id>` | Deletes a historical record   | Removes Argo-owned partial data but never a completed file |
+| `clear`       | Removes safe terminal history | Preserves active, queued, and paused work                  |
+
+## Commands
+
+```sh
+argo add https://example.org/archive.iso
+argo list
+argo show <id>
+argo pause <id>
+argo resume <id>
+argo cancel <id>
+argo retry <id>
+argo remove <id>
+argo clear
+```
+
+A canceled download can resume only when valid partial state still exists and the remote resource supports a safe continuation. Argo checks Range behavior plus available ETag or Last-Modified validators before appending. If those checks fail, use `retry` for a clean transfer.
+
+Active downloads cannot be silently removed. Completed files are never deleted by `remove` or `clear`.
+
+## Scheduler priority
+
+```sh
+argo priority <id> high
+argo priority <id> normal
+argo priority <id> low
+```
+
+Priority determines admission order among queued Argo downloads. It does not preempt an active transfer and does not configure system traffic shaping.
+
+## Watch mode
+
+```sh
+argo watch
+```
+
+In an interactive terminal, watch redraws a single dashboard region in place. Ctrl+C restores the terminal. When output is piped, Argo prints one deterministic snapshot and exits instead of emitting an endless stream of control sequences.
+
+## TUI
+
+```sh
+argo tui
+```
+
+The TUI is another client of `argod`. It lists downloads, keeps selection visible, shows full selected details, reports network and policy state, and exposes add, pause, resume, cancel, retry, remove, clear, priority, profile, and policy actions. Press `?` for its current key reference. Leaving the TUI does not stop downloads.
+
+Set `NO_COLOR=1` to disable ANSI color in ordinary CLI output.

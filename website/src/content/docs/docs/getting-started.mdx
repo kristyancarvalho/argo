@@ -1,0 +1,63 @@
+---
+title: Installation and first download
+description: Build Argo, start argod, and submit a persistent HTTP or HTTPS transfer.
+---
+
+Argo currently ships source builds and systemd unit files. Distribution packages are not published.
+
+## Requirements
+
+- Linux
+- Go 1.27 or newer
+- `make`
+- NetworkManager for connection and metered-state awareness
+- systemd, nftables, and iproute2 only for optional traffic governance
+
+## Build from source
+
+```sh
+git clone https://github.com/kristyancarvalho/argo.git
+cd argo
+make build
+```
+
+The build produces `bin/argo`, `bin/argod`, and `bin/argo-qosd`. The third executable is optional for ordinary downloads.
+
+## Start the daemon
+
+For a source-tree test, run:
+
+```sh
+make run
+```
+
+`make run` builds all executables and starts `bin/argod`. Keep that terminal open for this first test. A source installation can instead place the binaries in `/usr/bin` and enable `packaging/systemd/argod.service` as a user service.
+
+```sh
+sudo install -Dm755 bin/argo bin/argod bin/argo-qosd /usr/bin/
+install -Dm644 packaging/systemd/argod.service "$HOME/.config/systemd/user/argod.service"
+systemctl --user daemon-reload
+systemctl --user enable --now argod.service
+```
+
+The main daemon runs as your user. Do not start the entire download daemon as root.
+
+## Make a first download
+
+In another terminal, submit an HTTP or HTTPS URL:
+
+```sh
+./bin/argo add https://example.org/archive.iso
+./bin/argo list
+./bin/argo show <id>
+```
+
+Each `add` creates a new transfer identity, even when the URL was downloaded before. Completed files go to `$HOME/Downloads` by default. Internal partial data is kept separately under the XDG state hierarchy.
+
+## Confirm daemon state
+
+```sh
+./bin/argo status
+```
+
+The status view reports the daemon, NetworkManager observation, active profile, selected traffic policy, and any QoS helper error. A missing helper does not prevent ordinary downloads.

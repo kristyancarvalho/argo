@@ -1,0 +1,23 @@
+---
+title: Argo documentation
+description: Install, operate, configure, and understand the Argo traffic-aware download manager.
+---
+
+Argo is a Linux-first download manager built around a persistent, unprivileged daemon. The `argo` client and TUI control work over a protected Unix socket; closing either interface does not stop active transfers.
+
+Argo also has an optional traffic-governance path. Scheduler priority orders downloads managed by Argo. System traffic policy is a separate control that determines how Argo traffic competes with other applications through an isolated privileged helper.
+
+:::caution[Pre-1.0 software]
+Argo is functional early-stage software. Commands and persisted data are covered by migrations and tests, but the compatibility surface is not yet declared stable. Review release notes before upgrading.
+:::
+
+## Choose a route
+
+- [Install Argo and make a first download](/docs/getting-started/)
+- [Manage download lifecycle, watch output, and the TUI](/docs/downloads/)
+- [Configure destinations, XDG paths, limits, and profiles](/docs/configuration/)
+- [Understand NetworkManager observation and traffic policies](/docs/networking/)
+- [Review components and privilege boundaries](/docs/architecture/)
+- [Build, test, and contribute through the issue workflow](/docs/development/)
+
+Basic downloading needs neither root access nor `argo-qosd`. The helper is required only when a configured system traffic policy must change Linux networking state.
