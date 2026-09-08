@@ -1,0 +1,96 @@
+---
+import { project } from "../../data/project";
+---
+
+<section class="project-status" aria-labelledby="status-title">
+  <div class="status-heading">
+    <p>04 / Current position</p>
+    <h2 id="status-title">Functional.<br />Still evolving.</h2>
+  </div>
+  <div class="status-copy">
+    <p>
+      Argo is working pre-1.0 software. Its daemon, download lifecycle, persistence, terminal
+      interfaces, and optional Linux RX QoS path are implemented; compatibility is not yet declared
+      stable.
+    </p>
+    <dl>
+      <div><dt>Current release</dt><dd>{project.version}</dd></div>
+      <div><dt>Stage</dt><dd>{project.stage}</dd></div>
+      <div><dt>Platform</dt><dd>{project.platform}-first</dd></div>
+      <div><dt>License</dt><dd>{project.license}</dd></div>
+    </dl>
+    <a href={`${project.repository}/releases`}
+      >Read the release history <span aria-hidden="true">→</span></a
+    >
+  </div>
+</section>
+
+<style>
+  .project-status {
+    display: grid;
+    grid-template-columns: 0.9fr 1.1fr;
+    gap: clamp(3rem, 9vw, 9rem);
+    padding: clamp(5rem, 10vw, 9rem) clamp(1.25rem, 6vw, 6rem);
+    border-top: 1px solid var(--argo-border);
+    background: var(--argo-surface);
+  }
+  .status-heading > p {
+    color: var(--argo-blue-400);
+    font-family: var(--argo-font-mono);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  h2 {
+    margin: 1.5rem 0 0;
+    font-family: var(--argo-font-display);
+    font-size: clamp(3.5rem, 6vw, 6rem);
+    font-weight: 400;
+    letter-spacing: -0.06em;
+    line-height: 0.88;
+  }
+  .status-copy > p {
+    max-width: 42rem;
+    margin: 0 0 3rem;
+    color: var(--argo-text-muted);
+    font-size: clamp(1.05rem, 1.6vw, 1.3rem);
+    line-height: 1.7;
+  }
+  dl {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    margin: 0 0 2rem;
+    border-top: 1px solid var(--argo-border);
+  }
+  dl div {
+    padding: 1.2rem 0;
+    border-bottom: 1px solid var(--argo-border);
+  }
+  dt {
+    color: var(--argo-text-muted);
+    font-family: var(--argo-font-mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  dd {
+    margin: 0.45rem 0 0;
+    font-weight: 750;
+  }
+  .status-copy a {
+    color: var(--argo-blue-400);
+    font-weight: 700;
+    text-decoration: none;
+  }
+  @media (max-width: 50rem) {
+    .project-status {
+      grid-template-columns: 1fr;
+    }
+  }
+  @media (max-width: 32rem) {
+    dl {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

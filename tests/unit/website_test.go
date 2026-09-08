@@ -106,3 +106,62 @@ func TestWebsiteBrandingIsGeneratedFromCanonicalAssets(t *testing.T) {
 		t.Fatal("generated website branding is not ignored")
 	}
 }
+
+func TestWebsiteHomepageCommunicatesRealArgoBehavior(t *testing.T) {
+	root := repositoryRoot(t)
+	required := []string{
+		"website/src/components/Header.astro",
+		"website/src/components/Footer.astro",
+		"website/src/components/home/Hero.astro",
+		"website/src/components/home/NetworkFlow.astro",
+		"website/src/components/home/TerminalPreview.astro",
+		"website/src/components/home/Features.astro",
+		"website/src/components/home/Architecture.astro",
+		"website/src/components/home/ProjectStatus.astro",
+	}
+	for _, name := range required {
+		if _, err := os.Stat(filepath.Join(root, name)); err != nil {
+			t.Errorf("required homepage component %s: %v", name, err)
+		}
+	}
+	page, err := os.ReadFile(filepath.Join(root, "website", "src", "pages", "index.astro"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{`class="skip-link"`, `<Header />`, `<Hero />`, `<TerminalPreview />`, `<Features />`, `<Architecture />`, `<ProjectStatus />`, `<Footer />`} {
+		if !strings.Contains(string(page), expected) {
+			t.Errorf("homepage does not contain %s", expected)
+		}
+	}
+}
+
+func TestWebsiteTerminalPreviewUsesCurrentCLI(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join(repositoryRoot(t), "website", "src", "components", "home", "TerminalPreview.astro"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"argo add https://example.org/linux.iso", "Added a92f4c8e linux.iso (queued)", "argo list", "ID        STATUS        PROGRESS   FILENAME", "argo status", "Traffic policy: balanced"} {
+		if !strings.Contains(string(content), expected) {
+			t.Errorf("terminal preview does not contain current CLI behavior %q", expected)
+		}
+	}
+}
+
+func TestWebsiteHomepageProvidesResponsiveAndAccessibleNavigation(t *testing.T) {
+	header, err := os.ReadFile(filepath.Join(repositoryRoot(t), "website", "src", "components", "Header.astro"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{`aria-label="Primary navigation"`, `aria-label="Mobile navigation"`, `<details class="mobile-nav">`, `@media (max-width: 53rem)`} {
+		if !strings.Contains(string(header), expected) {
+			t.Errorf("homepage navigation does not contain %s", expected)
+		}
+	}
+	flow, err := os.ReadFile(filepath.Join(repositoryRoot(t), "website", "src", "components", "home", "NetworkFlow.astro"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(flow), `aria-hidden="true"`) {
+		t.Fatal("decorative network visualization is exposed to assistive technology")
+	}
+}

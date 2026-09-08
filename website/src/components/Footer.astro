@@ -1,0 +1,50 @@
+---
+import { project } from "../data/project";
+---
+
+<footer class="site-footer">
+  <div>
+    <img src="/branding/logo/argo-logo-mark.svg" alt="" width="32" height="32" />
+    <p><strong>{project.name}</strong> carries downloads across a governed route.</p>
+  </div>
+  <nav aria-label="Footer navigation">
+    <a href={`${project.repository}#readme`}>Documentation</a>
+    <a href={`${project.repository}/releases`}>Releases</a>
+    <a href={`${project.repository}/blob/main/LICENSE`}>{project.license}</a>
+  </nav>
+</footer>
+
+<style>
+  .site-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 2rem;
+    padding: 2rem clamp(1rem, 4vw, 3rem);
+    border-top: 1px solid var(--argo-border);
+    color: var(--argo-text-muted);
+    font-size: 0.85rem;
+  }
+  .site-footer div,
+  .site-footer nav {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+  .site-footer p {
+    margin: 0;
+  }
+  .site-footer a {
+    text-decoration: none;
+  }
+  .site-footer a:hover {
+    color: var(--argo-text);
+  }
+  @media (max-width: 45rem) {
+    .site-footer,
+    .site-footer nav {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+  }
+</style>
