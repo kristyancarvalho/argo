@@ -1,0 +1,176 @@
+---
+import { getCollection } from "astro:content";
+import Footer from "../../components/Footer.astro";
+import Header from "../../components/Header.astro";
+import SiteLayout from "../../layouts/SiteLayout.astro";
+
+const versions = new Intl.Collator("en", { numeric: true });
+const releases = (await getCollection("changelog")).sort((left, right) => {
+  const dateOrder = right.data.date.valueOf() - left.data.date.valueOf();
+  return dateOrder || versions.compare(right.data.version, left.data.version);
+});
+const date = new Intl.DateTimeFormat("en-US", {
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+  timeZone: "UTC",
+});
+---
+
+<SiteLayout title="Changelog" description="Published Argo releases and their validated changes.">
+  <a class="skip-link" href="#releases">Skip to releases</a>
+  <div class="changelog-frame">
+    <Header />
+    <main id="releases">
+      <header class="changelog-heading">
+        <p>Release log / verified history</p>
+        <h1>Every route<br />leaves a wake.</h1>
+        <p>Published Argo releases, drawn from the repository's real tags and release notes.</p>
+      </header>
+      <ol class="release-list">
+        {
+          releases.map((release, index) => (
+            <li>
+              <a href={`/changelog/${release.data.version}/`}>
+                <span class="sequence">{String(releases.length - index).padStart(2, "0")}</span>
+                <span class="release-title">
+                  <>
+                    <strong>{release.data.title}</strong>
+                    <small>{release.data.description}</small>
+                  </>
+                </span>
+                <span class="release-meta">
+                  <>
+                    <time datetime={release.data.date.toISOString()}>
+                      {date.format(release.data.date)}
+                    </time>
+                    <b>{release.data.version}</b>
+                  </>
+                </span>
+              </a>
+            </li>
+          ))
+        }
+      </ol>
+    </main>
+    <Footer />
+  </div>
+</SiteLayout>
+
+<style>
+  .skip-link {
+    position: fixed;
+    z-index: 100;
+    top: 1rem;
+    left: 1rem;
+    padding: 0.7rem 1rem;
+    color: var(--argo-blue-950);
+    background: var(--argo-text);
+    transform: translateY(-200%);
+  }
+  .skip-link:focus {
+    transform: translateY(0);
+  }
+  .changelog-frame {
+    width: min(calc(100% - 2rem), var(--argo-content));
+    margin: 1rem auto;
+    overflow: clip;
+    border: 1px solid var(--argo-border);
+    border-radius: var(--argo-radius-lg);
+    background: var(--argo-surface);
+    box-shadow: var(--argo-shadow);
+  }
+  .changelog-heading {
+    padding: clamp(4rem, 10vw, 9rem) clamp(1.25rem, 7vw, 7rem);
+    border-bottom: 1px solid var(--argo-border);
+    background:
+      radial-gradient(circle at 75% 35%, var(--argo-blue-500), transparent 25%),
+      linear-gradient(135deg, var(--argo-blue-700), var(--argo-blue-950));
+  }
+  .changelog-heading > p:first-child {
+    color: var(--argo-blue-200);
+    font-family: var(--argo-font-mono);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  h1 {
+    margin: 1.5rem 0;
+    font-family: var(--argo-font-display);
+    font-size: clamp(4rem, 9vw, 8rem);
+    font-weight: 400;
+    letter-spacing: -0.07em;
+    line-height: 0.82;
+  }
+  .changelog-heading > p:last-child {
+    max-width: 40rem;
+    color: var(--argo-blue-100);
+    font-size: 1.1rem;
+    line-height: 1.65;
+  }
+  .release-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .release-list li {
+    border-bottom: 1px solid var(--argo-border);
+  }
+  .release-list a {
+    display: grid;
+    grid-template-columns: 4rem minmax(0, 1fr) auto;
+    gap: clamp(1rem, 4vw, 4rem);
+    align-items: center;
+    padding: clamp(1.5rem, 4vw, 3rem) clamp(1.25rem, 6vw, 6rem);
+    text-decoration: none;
+    transition: background 160ms ease;
+  }
+  .release-list a:hover {
+    background: var(--argo-surface-raised);
+  }
+  .sequence,
+  .release-meta {
+    color: var(--argo-text-muted);
+    font-family: var(--argo-font-mono);
+    font-size: 0.68rem;
+  }
+  .release-title {
+    display: grid;
+    gap: 0.55rem;
+  }
+  .release-title strong {
+    font-size: clamp(1.35rem, 2.5vw, 2.25rem);
+    letter-spacing: -0.025em;
+  }
+  .release-title small {
+    max-width: 48rem;
+    color: var(--argo-text-muted);
+    font-size: 0.9rem;
+    line-height: 1.5;
+  }
+  .release-meta {
+    display: grid;
+    gap: 0.5rem;
+    justify-items: end;
+    white-space: nowrap;
+  }
+  .release-meta b {
+    color: var(--argo-blue-400);
+  }
+  @media (max-width: 42rem) {
+    .changelog-frame {
+      width: 100%;
+      margin: 0;
+      border-inline: 0;
+      border-radius: 0;
+    }
+    .release-list a {
+      grid-template-columns: 2rem minmax(0, 1fr);
+    }
+    .release-meta {
+      grid-column: 2;
+      justify-items: start;
+    }
+  }
+</style>

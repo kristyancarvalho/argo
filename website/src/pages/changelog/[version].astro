@@ -1,0 +1,21 @@
+---
+import { getCollection, render, type CollectionEntry } from "astro:content";
+import ReleaseLayout from "../../layouts/ReleaseLayout.astro";
+
+export async function getStaticPaths() {
+  const releases = await getCollection("changelog");
+  return releases.map((release) => ({
+    params: { version: release.data.version },
+    props: { release },
+  }));
+}
+
+interface Props {
+  release: CollectionEntry<"changelog">;
+}
+
+const { release } = Astro.props;
+const { Content } = await render(release);
+---
+
+<ReleaseLayout release={release}><Content /></ReleaseLayout>
