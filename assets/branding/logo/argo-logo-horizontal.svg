@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="320" viewBox="0 0 1040 320" role="img" aria-labelledby="title description">
+  <title id="title">Argo horizontal logo</title>
+  <desc id="description">Argo vessel mark and wordmark</desc>
+  <defs>
+    <linearGradient id="argo-horizontal-background" x1="54" y1="42" x2="278" y2="278" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1687E8"/>
+      <stop offset="1" stop-color="#0B3D78"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(24 24)">
+    <rect x="0" y="0" width="272" height="272" rx="64" fill="url(#argo-horizontal-background)"/>
+    <path d="M32 59C70 39 100 42 129 62C159 84 194 85 240 53" fill="none" stroke="#65B8FF" stroke-width="6" stroke-linecap="round" opacity=".34"/>
+    <path d="M136 47V174" fill="none" stroke="#F7FBFF" stroke-width="10" stroke-linecap="round"/>
+    <path d="M121 65V158H67C83 119 100 89 121 65Z" fill="#F7FBFF"/>
+    <path d="M151 77V158H208C193 122 174 96 151 77Z" fill="#D8EEFF"/>
+    <path d="M57 171H218L197 203H88L57 171Z" fill="#F7FBFF"/>
+    <path d="M42 220C66 209 88 209 111 220C134 231 157 231 180 220C201 210 219 210 238 218" fill="none" stroke="#8BCBFF" stroke-width="9" stroke-linecap="round"/>
+  </g>
+  <text x="352" y="218" fill="#1687E8" font-family="DejaVu Sans, Liberation Sans, Arial, sans-serif" font-size="160" font-weight="700" letter-spacing="18">ARGO</text>
+</svg>

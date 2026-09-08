@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="600" viewBox="0 0 1200 600" role="img" aria-labelledby="title description">
+  <title id="title">Argo logo dark-background preview</title>
+  <desc id="description">Argo horizontal identity presented on the midnight blue brand background</desc>
+  <defs>
+    <linearGradient id="argo-preview-background" x1="0" y1="0" x2="1200" y2="600" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#071A33"/>
+      <stop offset="1" stop-color="#0B2A4A"/>
+    </linearGradient>
+    <linearGradient id="argo-preview-mark" x1="102" y1="166" x2="370" y2="434" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1687E8"/>
+      <stop offset="1" stop-color="#0B3D78"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="600" rx="36" fill="url(#argo-preview-background)"/>
+  <g transform="translate(88 152)">
+    <rect width="296" height="296" rx="68" fill="url(#argo-preview-mark)"/>
+    <path d="M31 57C72 35 105 39 137 60C170 84 208 86 265 49" fill="none" stroke="#65B8FF" stroke-width="7" stroke-linecap="round" opacity=".34"/>
+    <path d="M148 51V183" fill="none" stroke="#F7FBFF" stroke-width="11" stroke-linecap="round"/>
+    <path d="M132 70V166H73C90 126 109 94 132 70Z" fill="#F7FBFF"/>
+    <path d="M164 82V166H226C210 128 189 101 164 82Z" fill="#D8EEFF"/>
+    <path d="M63 180H237L215 214H96L63 180Z" fill="#F7FBFF"/>
+    <path d="M46 239C72 227 96 227 121 239C146 251 172 251 197 239C220 229 241 229 262 237" fill="none" stroke="#8BCBFF" stroke-width="10" stroke-linecap="round"/>
+  </g>
+  <text x="458" y="360" fill="#F7FBFF" font-family="DejaVu Sans, Liberation Sans, Arial, sans-serif" font-size="166" font-weight="700" letter-spacing="18">ARGO</text>
+  <text x="466" y="417" fill="#65B8FF" font-family="DejaVu Sans Mono, Liberation Mono, monospace" font-size="21" letter-spacing="4">NAVIGATE THE FLOW</text>
+</svg>
