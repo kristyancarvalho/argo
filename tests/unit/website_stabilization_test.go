@@ -21,7 +21,7 @@ func TestWebsiteBuildValidatorCoversRoutesAssetsAndInternalMaterial(t *testing.T
 	value := string(script)
 	for _, expected := range []string{
 		"docs/getting-started/index.html",
-		"changelog/v0.7.4/index.html",
+		"changelog/v0.8.0/index.html",
 		"branding/banner/argo-social-preview.png",
 		"unresolved local target",
 		"unresolved fragment",
