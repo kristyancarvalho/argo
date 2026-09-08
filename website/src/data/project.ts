@@ -9,4 +9,6 @@ export const project = {
   stage: "Pre-1.0",
   status: "Early development",
   version: "v0.7.4",
+  themeColor: "#071a33",
+  socialImage: "/branding/banner/argo-social-preview.png",
 } as const;

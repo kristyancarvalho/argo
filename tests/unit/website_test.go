@@ -3,6 +3,7 @@ package unit_test
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -220,5 +221,71 @@ func TestStarlightUsesArgoBrandingAndExplicitRoutes(t *testing.T) {
 	}
 	if !strings.Contains(string(contentConfig), "docsLoader()") || !strings.Contains(string(contentConfig), "docsSchema()") {
 		t.Fatal("Starlight content collection does not use its loader and schema")
+	}
+}
+
+func TestWebsiteChangelogCoversPublishedGitTags(t *testing.T) {
+	root := repositoryRoot(t)
+	files, err := filepath.Glob(filepath.Join(root, "website", "src", "content", "changelog", "v*.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := make(map[string]bool, len(files))
+	for _, path := range files {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		version := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+		value := string(content)
+		for _, expected := range []string{"title:", "version: " + version, "date:", "description:"} {
+			if !strings.Contains(value, expected) {
+				t.Errorf("changelog %s does not contain %q", version, expected)
+			}
+		}
+		entries[version] = true
+	}
+
+	command := exec.Command("git", "tag", "--list", "v*")
+	command.Dir = root
+	output, err := command.Output()
+	if err != nil {
+		t.Skipf("git tags unavailable: %v", err)
+	}
+	for _, version := range strings.Fields(string(output)) {
+		if !entries[version] {
+			t.Errorf("published tag %s has no changelog entry", version)
+		}
+	}
+}
+
+func TestWebsiteChangelogAndMetadataRoutesExist(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, name := range []string{
+		"website/src/pages/changelog/index.astro",
+		"website/src/pages/changelog/[version].astro",
+		"website/src/layouts/ReleaseLayout.astro",
+		"website/src/content/docs/404.mdx",
+		"website/public/robots.txt",
+	} {
+		if _, err := os.Stat(filepath.Join(root, name)); err != nil {
+			t.Errorf("required changelog or metadata file %s: %v", name, err)
+		}
+	}
+	layout, err := os.ReadFile(filepath.Join(root, "website", "src", "layouts", "SiteLayout.astro"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"og:title", "og:description", "og:image", "twitter:card", `rel="canonical"`} {
+		if !strings.Contains(string(layout), expected) {
+			t.Errorf("site metadata layout does not contain %s", expected)
+		}
+	}
+	config, err := os.ReadFile(filepath.Join(root, "website", "astro.config.mjs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(config), "process.env.PUBLIC_SITE_URL") || strings.Contains(string(config), "vercel.app") {
+		t.Fatal("canonical site URL must be configurable without an invented deployment domain")
 	}
 }

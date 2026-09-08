@@ -3,6 +3,7 @@ import starlight from "@astrojs/starlight";
 
 export default defineConfig({
   output: "static",
+  site: process.env.PUBLIC_SITE_URL,
   integrations: [
     starlight({
       title: "Argo",
