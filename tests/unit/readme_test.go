@@ -87,6 +87,19 @@ func TestReadmeBrandingAndLocalLinksResolve(t *testing.T) {
 	if !strings.Contains(readme, "actions/workflows/ci.yml/badge.svg?branch=main") {
 		t.Fatal("README does not contain the live main-branch CI badge")
 	}
+	for _, expected := range []string{
+		"img.shields.io/github/actions/workflow/status/kristyancarvalho/argo/tests.yml",
+		"branch=dev",
+		"label=TESTS",
+		"labelColor=0E5AA7",
+		"actions/workflows/tests.yml?query=branch%3Adev",
+		"`CI` reports formatting, vet, lint, and executable builds on `main`.",
+		"`TESTS` reports the dedicated unit, integration, safe end-to-end, and race suite on `dev`.",
+	} {
+		if !strings.Contains(readme, expected) {
+			t.Fatalf("README does not contain dynamic test status content %q", expected)
+		}
+	}
 	patterns := []*regexp.Regexp{
 		regexp.MustCompile(`(?:src|href)="([^"]+)"`),
 		regexp.MustCompile(`\[[^]]*\]\(([^)]+)\)`),
@@ -100,6 +113,40 @@ func TestReadmeBrandingAndLocalLinksResolve(t *testing.T) {
 			if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(target))); err != nil {
 				t.Fatalf("local README target %q does not resolve: %v", target, err)
 			}
+		}
+	}
+}
+
+func TestReadmeUsesStructuredArchitectureAndRepositoryLayout(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join(repositoryRoot(t), "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	readme := string(content)
+	for _, required := range []string{
+		"```mermaid\nflowchart TD",
+		"Client[\"argo CLI / TUI\"]",
+		"Daemon[\"argod\"]",
+		"Helper[\"argo-qosd\"]",
+		"NFT[\"nftables / conntrack\"]",
+		"TC[\"tc / IFB\"]",
+		"| Path | Purpose |",
+		"| `assets/branding/` |",
+		"| `tests/e2e/` |",
+	} {
+		if !strings.Contains(readme, required) {
+			t.Fatalf("README does not contain structured content %q", required)
+		}
+	}
+	if strings.Contains(readme, "BRAND"+".md") {
+		t.Fatal("README still references the removed public brand guide")
+	}
+	blocks := regexp.MustCompile("(?s)```([^\\n]*)\\n(.*?)```").FindAllStringSubmatch(readme, -1)
+	for _, block := range blocks {
+		switch strings.TrimSpace(block[1]) {
+		case "sh", "toml", "mermaid":
+		default:
+			t.Fatalf("README contains a non-command diagrammatic code block with language %q", block[1])
 		}
 	}
 }
