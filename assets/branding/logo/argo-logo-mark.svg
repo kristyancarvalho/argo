@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title description">
+  <title id="title">Argo logo mark</title>
+  <desc id="description">A minimal sailing vessel formed from an A above flowing network routes</desc>
+  <defs>
+    <linearGradient id="argo-mark-background" x1="30" y1="24" x2="226" y2="234" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1687E8"/>
+      <stop offset="1" stop-color="#0B3D78"/>
+    </linearGradient>
+    <linearGradient id="argo-mark-sail" x1="83" y1="72" x2="176" y2="157" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F7FBFF"/>
+      <stop offset="1" stop-color="#D8EEFF"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="224" height="224" rx="52" fill="url(#argo-mark-background)"/>
+  <path d="M42 65C74 48 98 50 122 67C148 86 177 87 214 61" fill="none" stroke="#65B8FF" stroke-width="5" stroke-linecap="round" opacity=".34"/>
+  <path d="M126 54V159" fill="none" stroke="#F7FBFF" stroke-width="8" stroke-linecap="round"/>
+  <path d="M114 68V146H70C83 113 96 88 114 68Z" fill="url(#argo-mark-sail)"/>
+  <path d="M138 78V146H185C173 116 157 93 138 78Z" fill="#D8EEFF"/>
+  <path d="M62 157H194L177 184H88L62 157Z" fill="#F7FBFF"/>
+  <path d="M49 197C69 188 87 188 106 197C125 206 144 206 163 197C180 189 195 189 211 195" fill="none" stroke="#8BCBFF" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="49" cy="197" r="4" fill="#D8EEFF"/>
+  <circle cx="211" cy="195" r="4" fill="#D8EEFF"/>
+</svg>
