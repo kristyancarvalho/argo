@@ -312,7 +312,7 @@ The isolated kernel QoS tests are capability-gated and skip when the required na
 
 ## Brand assets
 
-The canonical blue logo sources, banners, widgets, previews, and PNG exports live in [`assets/branding/`](assets/branding/). Run `./assets/branding/export.sh` to regenerate raster assets when `rsvg-convert` is installed.
+The canonical blue logo sources, banners, widgets, previews, and PNG exports live in [`assets/branding/`](assets/branding/). Run `./assets/branding/export.sh` to regenerate raster assets when `rsvg-convert` is installed. To change banner copy, edit and run `node assets/branding/banner/generate.mjs` with Pango and DejaVu Serif installed, then regenerate the PNGs. The committed SVGs contain outlined text and need no installed fonts to display.
 
 ## License
 

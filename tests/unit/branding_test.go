@@ -120,7 +120,10 @@ func TestBannerDisplayTypographyIsPortableVectorGeometry(t *testing.T) {
 		if strings.Contains(value, "<text") || strings.Contains(value, "font-family") {
 			t.Fatalf("%s depends on locally installed fonts", name)
 		}
-		for _, expected := range []string{"Control the flow", "DejaVu Serif", "-glyph-", "<use href="} {
+		if strings.Contains(value, "Control the flow") {
+			t.Fatalf("%s repeats the homepage slogan instead of identifying the project", name)
+		}
+		for _, expected := range []string{"Argo. A traffic-aware download manager for Linux.", "DejaVu Serif", "-glyph-", "<use href="} {
 			if !strings.Contains(value, expected) {
 				t.Errorf("%s does not contain portable display typography evidence %q", name, expected)
 			}
