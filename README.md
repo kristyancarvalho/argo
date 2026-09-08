@@ -13,7 +13,7 @@ Argo is a terminal-first download manager for Linux. A persistent user daemon ha
   <img src="assets/branding/widgets/platform-linux.svg" alt="Platform: Linux" height="28">
   <a href="LICENSE"><img src="assets/branding/widgets/license-gpl3.svg" alt="License: GPL-3.0-or-later" height="28"></a>
   <a href="https://github.com/kristyancarvalho/argo/actions/workflows/ci.yml"><img src="https://github.com/kristyancarvalho/argo/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI status"></a>
-  <a href="https://github.com/kristyancarvalho/argo/actions/workflows/tests.yml?query=branch%3Adev"><img src="https://img.shields.io/github/actions/workflow/status/kristyancarvalho/argo/tests.yml?branch=dev&amp;label=TESTS&amp;labelColor=0E5AA7&amp;style=flat" alt="Automated tests status"></a>
+  <a href="https://github.com/kristyancarvalho/argo/actions/workflows/tests.yml?query=branch%3Adev"><img src="https://github.com/kristyancarvalho/argo/actions/workflows/tests.yml/badge.svg?branch=dev" alt="Automated tests status"></a>
 </p>
 
 `CI` reports formatting, vet, lint, and executable builds on `main`. `TESTS` reports the dedicated unit, integration, safe end-to-end, and race suite on `dev`.
