@@ -5,7 +5,9 @@ import (
 	"encoding/xml"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -108,15 +110,56 @@ func TestBrandingPNGExportsHaveExpectedDimensions(t *testing.T) {
 	}
 }
 
-func TestBrandGuideDocumentsCanonicalPaletteAndExports(t *testing.T) {
-	content, err := os.ReadFile(filepath.Join(brandingRoot(t), "BRAND.md"))
-	if err != nil {
-		t.Fatal(err)
+func TestBrandingWidgetsProvideTextPadding(t *testing.T) {
+	type geometry struct {
+		width int
+		split int
 	}
-	guide := string(content)
-	for _, value := range []string{"#071A33", "#0E5AA7", "#1687E8", "#65B8FF", "#D8EEFF", "export.sh"} {
-		if !strings.Contains(guide, value) {
-			t.Fatalf("brand guide does not contain %q", value)
+	widgets := map[string]geometry{
+		"status-early-development.svg": {width: 260, split: 104},
+		"stage-pre-1-0.svg":            {width: 178, split: 96},
+		"language-go.svg":              {width: 174, split: 120},
+		"platform-linux.svg":           {width: 190, split: 120},
+		"license-gpl3.svg":             {width: 204, split: 108},
+	}
+	rootPattern := regexp.MustCompile(`<svg[^>]+width="(\d+)"[^>]+height="34"[^>]+viewBox="0 0 (\d+) 34"`)
+	textPattern := regexp.MustCompile(`<text x="(\d+)"[^>]*>([^<]+)</text>`)
+	for name, expected := range widgets {
+		content, err := os.ReadFile(filepath.Join(brandingRoot(t), "widgets", name))
+		if err != nil {
+			t.Fatal(err)
 		}
+		svg := string(content)
+		root := rootPattern.FindStringSubmatch(svg)
+		if len(root) != 3 || root[1] != strconv.Itoa(expected.width) || root[2] != strconv.Itoa(expected.width) {
+			t.Fatalf("%s width and viewBox do not match %d", name, expected.width)
+		}
+		if !strings.Contains(svg, "H"+strconv.Itoa(expected.split)+"V34") {
+			t.Fatalf("%s does not use label split %d", name, expected.split)
+		}
+		texts := textPattern.FindAllStringSubmatch(svg, -1)
+		if len(texts) != 2 {
+			t.Fatalf("%s has %d text fields", name, len(texts))
+		}
+		labelX, _ := strconv.Atoi(texts[0][1])
+		valueX, _ := strconv.Atoi(texts[1][1])
+		labelEnd := labelX + len(texts[0][2])*8
+		valueEnd := valueX + len(texts[1][2])*7
+		if expected.split-labelEnd < 16 {
+			t.Fatalf("%s label padding is less than 16 pixels", name)
+		}
+		if valueX-expected.split < 12 {
+			t.Fatalf("%s value starts without 12 pixels of padding", name)
+		}
+		if expected.width-valueEnd < 16 {
+			t.Fatalf("%s value padding is less than 16 pixels", name)
+		}
+	}
+}
+
+func TestPublicBrandGuideIsAbsent(t *testing.T) {
+	_, err := os.Stat(filepath.Join(brandingRoot(t), "BRAND"+".md"))
+	if !os.IsNotExist(err) {
+		t.Fatalf("public brand guide remains: %v", err)
 	}
 }

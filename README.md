@@ -70,20 +70,33 @@ Large downloads should not require an interactive client to remain open, overwri
 
 ## Architecture
 
-```text
-                       protected Unix IPC
-  argo CLI / TUI  ------------------------------>  argod
-                                                       |
-                    +----------------------------------+------------------+
-                    |                  |               |                  |
-                 downloader        scheduler       SQLite          NetworkManager
-                    |                                  |                  |
-              XDG state parts                    persistent state    link awareness
-                    |
-              completed files
+```mermaid
+flowchart TD
+    Client["argo CLI / TUI"] -->|Protected Unix IPC| Daemon["argod"]
 
-  argod  -- authenticated Unix IPC -->  argo-qosd  -->  nftables + tc + IFB
-                                             optional privileged boundary
+    subgraph UserSpace["Unprivileged user space"]
+        Daemon --> Scheduler["Scheduler"]
+        Scheduler --> Downloader["Downloader"]
+        Daemon --> Storage["SQLite persistence"]
+        Daemon --> Network["NetworkManager observer"]
+        Downloader --> Parts["XDG partial-file state"]
+        Downloader --> Files["Completed downloads"]
+        Downloader --> Storage
+        Daemon --> Policy["QoS policy engine"]
+    end
+
+    subgraph Privileged["Privileged QoS boundary"]
+        Helper["argo-qosd"]
+    end
+
+    subgraph Kernel["Linux networking"]
+        NFT["nftables / conntrack"]
+        TC["tc / IFB"]
+    end
+
+    Policy -->|Authenticated Unix IPC| Helper
+    Helper --> NFT
+    Helper --> TC
 ```
 
 `argod` runs as the user and remains the sole owner of download lifecycle state. The optional helper accepts a constrained protocol and owns only Argo's networking objects. The ordinary CLI never performs downloads itself.
@@ -282,22 +295,21 @@ The isolated kernel QoS tests are capability-gated and skip when the required na
 
 ## Repository structure
 
-```text
-argo/
-├── assets/branding/   Logo sources, exports, banners, widgets, and brand guide
-├── cmd/               argo, argod, and argo-qosd entry points
-├── internal/          Application packages and private implementation
-├── packaging/systemd/ User daemon and privileged helper units
-├── tests/unit/        Focused component and contract tests
-├── tests/integration/ Cross-component behavior tests
-├── tests/e2e/         Binary, lifecycle, and isolated system tests
-├── Makefile           Build and validation entry points
-└── LICENSE            GPL-3.0-or-later license text
-```
+| Path | Purpose |
+| --- | --- |
+| `assets/branding/` | Logo sources, exports, banners, widgets, and previews |
+| `cmd/` | Entry points for `argo`, `argod`, and `argo-qosd` |
+| `internal/` | Private application packages and subsystem implementations |
+| `packaging/systemd/` | User daemon and privileged helper service definitions |
+| `tests/unit/` | Focused component and repository-contract tests |
+| `tests/integration/` | Cross-component behavior tests |
+| `tests/e2e/` | Binary, lifecycle, and isolated system tests |
+| `Makefile` | Build and validation entry points |
+| `LICENSE` | GPL-3.0-or-later license text |
 
 ## Brand assets
 
-The canonical blue identity, usage guidance, palette, SVG sources, and PNG exports live in [`assets/branding/`](assets/branding/BRAND.md). Run `./assets/branding/export.sh` to regenerate raster assets when `rsvg-convert` is installed.
+The canonical blue logo sources, banners, widgets, previews, and PNG exports live in [`assets/branding/`](assets/branding/). Run `./assets/branding/export.sh` to regenerate raster assets when `rsvg-convert` is installed.
 
 ## License
 

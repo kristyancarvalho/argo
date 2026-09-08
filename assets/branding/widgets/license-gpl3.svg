@@ -1,9 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="210" height="34" viewBox="0 0 210 34" role="img" aria-labelledby="title description">
+<svg xmlns="http://www.w3.org/2000/svg" width="204" height="34" viewBox="0 0 204 34" role="img" aria-labelledby="title description">
   <title id="title">License: GPL-3.0-or-later</title>
   <desc id="description">Argo is licensed under GPL-3.0-or-later</desc>
-  <rect width="210" height="34" rx="8" fill="#071A33"/>
-  <path d="M8 0H88V34H8A8 8 0 0 1 0 26V8A8 8 0 0 1 8 0Z" fill="#0E5AA7"/>
+  <rect width="204" height="34" rx="8" fill="#071A33"/>
+  <path d="M8 0H108V34H8A8 8 0 0 1 0 26V8A8 8 0 0 1 8 0Z" fill="#0E5AA7"/>
   <circle cx="18" cy="17" r="4" fill="#65B8FF"/>
   <text x="29" y="22" fill="#D8EEFF" font-family="DejaVu Sans,Arial,sans-serif" font-size="13" font-weight="700">LICENSE</text>
-  <text x="100" y="22" fill="#F7FBFF" font-family="DejaVu Sans,Arial,sans-serif" font-size="13">GPL-3.0+</text>
+  <text x="120" y="22" fill="#F7FBFF" font-family="DejaVu Sans,Arial,sans-serif" font-size="13">GPL-3.0+</text>
 </svg>
