@@ -22,7 +22,12 @@
 }
 
 body {
-  background: var(--argo-background);
+  background: var(--sl-color-bg);
+}
+.main-pane,
+.content-panel,
+.right-sidebar {
+  background-color: var(--sl-color-bg);
 }
 .site-title img {
   width: auto;
@@ -49,10 +54,18 @@ body {
   --ec-brdRad: var(--argo-radius-sm);
 }
 
-:root[data-theme="light"] {
+:root[data-theme="light"],
+[data-theme="light"] ::backdrop {
+  --sl-color-accent-low: var(--argo-blue-100);
+  --sl-color-accent: var(--argo-blue-600);
+  --sl-color-accent-high: var(--argo-blue-700);
   --sl-color-bg: var(--argo-blue-50);
   --sl-color-bg-nav: var(--argo-blue-50);
   --sl-color-bg-sidebar: var(--argo-blue-50);
+  --sl-color-bg-inline-code: var(--argo-blue-100);
+  --sl-color-bg-accent: var(--argo-blue-600);
+  --sl-color-text-accent: var(--argo-blue-600);
+  --sl-color-text-invert: var(--argo-blue-50);
   --sl-color-white: var(--argo-blue-950);
   --sl-color-gray-1: var(--argo-blue-950);
   --sl-color-gray-2: var(--argo-blue-700);
@@ -61,4 +74,29 @@ body {
   --sl-color-gray-5: var(--argo-blue-50);
   --sl-color-gray-6: var(--argo-text);
   --sl-color-black: var(--argo-text);
+  --sl-color-hairline: var(--argo-blue-200);
+  --sl-color-hairline-light: var(--argo-blue-100);
+  --sl-color-hairline-shade: var(--argo-blue-100);
+}
+
+site-search dialog {
+  height: max-content;
+  min-height: 0;
+  max-height: 100%;
+  border-color: var(--sl-color-hairline);
+  background-color: var(--sl-color-bg-nav);
+}
+site-search .dialog-frame {
+  flex-grow: 0;
+}
+#starlight__search .pagefind-ui__search-input::placeholder {
+  color: var(--sl-color-gray-2);
+  opacity: 0.72;
+}
+
+@media (min-width: 50rem) {
+  site-search dialog {
+    max-height: calc(100% - 8rem);
+    border-radius: var(--argo-radius-md);
+  }
 }
