@@ -68,7 +68,7 @@ func TestAdaptiveProfileSwitchReconcilesActiveDownload(t *testing.T) {
 		MaximumConcurrentDownloads: 1,
 		NetworkObserver:            observer,
 		TrafficLinkRate:            100_000_000,
-		TrafficCgroupID:            42,
+		TrafficCgroup:              qos.CgroupSelector{Path: "argo.service", Level: 1},
 		TrafficBackend:             backend,
 		Profiles: map[string]daemon.Profile{
 			"responsive": {
@@ -107,7 +107,7 @@ func TestProfileSwitchReportsQoSFailure(t *testing.T) {
 		MaximumConcurrentDownloads: 1,
 		NetworkObserver:            observer,
 		TrafficLinkRate:            100_000_000,
-		TrafficCgroupID:            42,
+		TrafficCgroup:              qos.CgroupSelector{Path: "argo.service", Level: 1},
 		TrafficBackend:             backend,
 		Profiles: map[string]daemon.Profile{
 			"throughput": {
@@ -206,10 +206,10 @@ func TestProfileSelectsMeteredBehavior(t *testing.T) {
 	observer := newControlledNetworkObserver()
 	service := newProfileService(t, store, engine, observer)
 	defer closeSchedulerService(t, service)
-	switchProfile(t, service, "gaming")
+	observer.send(t, network.Snapshot{Connected: true, Metered: network.MeteredYes})
 	identifier := addScheduledDownload(t, service, "metered-profile")
 	assertStartedDownload(t, engine, identifier)
-	observer.send(t, network.Snapshot{Metered: network.MeteredYes})
+	switchProfile(t, service, "gaming")
 	waitForDownload(t, store, identifier, func(download model.Download) bool {
 		return download.Status == model.StatusPaused
 	})

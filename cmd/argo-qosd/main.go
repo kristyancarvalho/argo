@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/kristyancarvalho/argo/internal/qos"
 	"github.com/kristyancarvalho/argo/internal/qosbackend"
@@ -29,6 +31,7 @@ func run(arguments []string) error {
 	flags := flag.NewFlagSet("argo-qosd", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	socketPath := flags.String("socket", qosipc.DefaultSocketPath, "QoS helper Unix socket")
+	statePath := flags.String("state", qosipc.DefaultStatePath, "QoS helper recovery state")
 	allowedUID := flags.Uint("allowed-uid", uint(userID), "authorized peer user ID")
 	if err := flags.Parse(arguments); err != nil {
 		return fmt.Errorf("parse QoS helper arguments: %w", err)
@@ -43,8 +46,15 @@ func run(arguments []string) error {
 	if err != nil {
 		return err
 	}
-	controller, err := qos.NewController(qosbackend.New())
+	persistentBackend, err := qosbackend.NewPersistent(qosbackend.New(), *statePath)
 	if err != nil {
+		return err
+	}
+	controller, err := qos.NewController(persistentBackend)
+	if err != nil {
+		return err
+	}
+	if err := controller.Recover(context.Background()); err != nil {
 		return err
 	}
 	service, err := qosipc.NewService(controller)
@@ -58,5 +68,10 @@ func run(arguments []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	return server.Serve(ctx)
+	serveError := server.Serve(ctx)
+	cleanupContext, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	cleanupError := controller.Reconcile(cleanupContext, qos.DesiredState{Policy: qos.PolicyOff})
+	cleanupCancel()
+
+	return errors.Join(serveError, cleanupError)
 }

@@ -53,14 +53,7 @@ func (service *Service) Handle(ctx context.Context, request Request) (any, error
 		if err := qos.ValidateInterface(payload.Interface); err != nil {
 			return nil, RequestError{ErrorCode: "invalid_request", Message: err.Error()}
 		}
-		current, applied := service.controller.Current()
-		if applied && current.Interface != payload.Interface {
-			return nil, RequestError{
-				ErrorCode: "invalid_request",
-				Message:   fmt.Sprintf("interface %q does not own current QoS state", payload.Interface),
-			}
-		}
-		if err := service.controller.Reconcile(ctx, qos.DesiredState{Policy: qos.PolicyOff}); err != nil {
+		if err := service.controller.Remove(ctx, payload.Interface); err != nil {
 			return nil, err
 		}
 		return service.status(), nil

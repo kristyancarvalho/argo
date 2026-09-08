@@ -20,7 +20,7 @@ const (
 
 type ClassificationRule struct {
 	Class      TrafficClass
-	CgroupID   uint64
+	Cgroup     CgroupSelector
 	PacketMark uint32
 	MarkMask   uint32
 }
@@ -32,12 +32,12 @@ type ClassificationPlan struct {
 	DefaultClass TrafficClass
 }
 
-func GenerateClassification(interfaceName string, cgroupID uint64) (ClassificationPlan, error) {
+func GenerateClassification(interfaceName string, cgroup CgroupSelector) (ClassificationPlan, error) {
 	if err := ValidateInterface(interfaceName); err != nil {
 		return ClassificationPlan{}, err
 	}
-	if cgroupID == 0 {
-		return ClassificationPlan{}, fmt.Errorf("argo cgroup identifier is required")
+	if err := cgroup.Validate(); err != nil {
+		return ClassificationPlan{}, err
 	}
 
 	return ClassificationPlan{
@@ -45,7 +45,7 @@ func GenerateClassification(interfaceName string, cgroupID uint64) (Classificati
 		Interface: interfaceName,
 		ArgoRule: ClassificationRule{
 			Class:      TrafficClassArgo,
-			CgroupID:   cgroupID,
+			Cgroup:     cgroup,
 			PacketMark: ArgoPacketMark,
 			MarkMask:   ArgoPacketMarkMask,
 		},
@@ -63,7 +63,7 @@ func (plan ClassificationPlan) Validate() error {
 	if err := ValidateInterface(plan.Interface); err != nil {
 		return err
 	}
-	if plan.ArgoRule.Class != TrafficClassArgo || plan.ArgoRule.CgroupID == 0 {
+	if plan.ArgoRule.Class != TrafficClassArgo || plan.ArgoRule.Cgroup.Validate() != nil {
 		return fmt.Errorf("classification plan requires one Argo cgroup rule")
 	}
 	if plan.ArgoRule.PacketMark != ArgoPacketMark || plan.ArgoRule.MarkMask != ArgoPacketMarkMask {

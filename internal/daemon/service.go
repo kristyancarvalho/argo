@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kristyancarvalho/argo/internal/diagnostic"
 	"github.com/kristyancarvalho/argo/internal/ipc"
 	"github.com/kristyancarvalho/argo/internal/model"
 	"github.com/kristyancarvalho/argo/internal/network"
@@ -24,12 +26,19 @@ import (
 
 const DefaultMaximumConcurrentDownloads = 3
 
+const (
+	defaultListPageSize    = 100
+	maximumListPageSize    = 200
+	maximumSummaryFilename = 1024
+)
+
 type Store interface {
 	CreateDownload(context.Context, model.Download) error
 	DeleteDownload(context.Context, model.DownloadID) error
 	ClearDownloadHistory(context.Context) ([]model.Download, error)
 	Download(context.Context, model.DownloadID) (model.Download, error)
 	Downloads(context.Context) ([]model.Download, error)
+	DownloadPage(context.Context, model.DownloadCursor, int) ([]model.Download, model.DownloadCursor, bool, error)
 	RecoverActiveDownloads(context.Context, time.Time) error
 	UpdateDownloadPriority(context.Context, model.DownloadID, model.Priority, time.Time) error
 	UpdateDownloadStatus(context.Context, model.DownloadID, model.Status, time.Time, string) error
@@ -41,6 +50,10 @@ type DownloadEngine interface {
 
 type PartialCleaner interface {
 	RemovePartial(model.DownloadID) error
+}
+
+type FinalizationRecoverer interface {
+	RecoverFinalizations(context.Context, []model.Download) error
 }
 
 type CanceledResumeValidator interface {
@@ -60,6 +73,10 @@ type NetworkObserver interface {
 	Observe(context.Context, func(network.Snapshot) error) error
 }
 
+type NetworkReconnector interface {
+	Reconnect(context.Context) error
+}
+
 type TelemetryObserver interface {
 	Observe(context.Context, func(telemetry.Snapshot) error) error
 }
@@ -74,7 +91,7 @@ type ServiceOptions struct {
 	Profiles                   map[string]Profile
 	TrafficPolicy              qos.Policy
 	TrafficLinkRate            uint64
-	TrafficCgroupID            uint64
+	TrafficCgroup              qos.CgroupSelector
 	TrafficBackend             qos.Backend
 	TelemetryObserver          TelemetryObserver
 	LatencyPolicy              *qos.LatencyPolicy
@@ -116,12 +133,17 @@ type Service struct {
 	cancel             context.CancelFunc
 	waitGroup          sync.WaitGroup
 	closeOnce          sync.Once
+	closeErr           error
 	activeMutex        sync.Mutex
 	activeCancels      map[model.DownloadID]context.CancelFunc
 	networkObserver    NetworkObserver
+	networkReady       chan struct{}
+	networkReadyOnce   sync.Once
+	networkPolicyMutex sync.Mutex
 	networkMutex       sync.RWMutex
 	networkSnapshot    network.Snapshot
 	networkAvailable   bool
+	networkError       string
 	pauseOnMetered     bool
 	resumeAfterMetered bool
 	meteredMutex       sync.Mutex
@@ -136,7 +158,7 @@ type Service struct {
 	trafficController  *qos.Controller
 	trafficPolicy      qos.Policy
 	trafficLinkRate    uint64
-	trafficCgroupID    uint64
+	trafficCgroup      qos.CgroupSelector
 	trafficErrorMutex  sync.RWMutex
 	trafficError       string
 	telemetryObserver  TelemetryObserver
@@ -228,10 +250,19 @@ func NewServiceWithOptions(
 	if len(profiles) > 0 && (!supportsProfiles || !controlsRate) {
 		return nil, fmt.Errorf("service dependencies cannot apply profiles")
 	}
+	downloads, err := store.Downloads(parent)
+	if err != nil {
+		return nil, err
+	}
+	if recoverer, ok := engine.(FinalizationRecoverer); ok {
+		if err := recoverer.RecoverFinalizations(parent, downloads); err != nil {
+			return nil, err
+		}
+	}
 	if err := store.RecoverActiveDownloads(parent, time.Now().UTC()); err != nil {
 		return nil, err
 	}
-	downloads, err := store.Downloads(parent)
+	downloads, err = store.Downloads(parent)
 	if err != nil {
 		return nil, err
 	}
@@ -265,6 +296,7 @@ func NewServiceWithOptions(
 		cancel:             cancel,
 		activeCancels:      make(map[model.DownloadID]context.CancelFunc),
 		networkObserver:    options.NetworkObserver,
+		networkReady:       make(chan struct{}),
 		pauseOnMetered:     options.PauseOnMetered,
 		resumeAfterMetered: options.ResumeAfterMetered,
 		meteredPaused:      make(map[model.DownloadID]struct{}),
@@ -277,11 +309,14 @@ func NewServiceWithOptions(
 		trafficController:  trafficController,
 		trafficPolicy:      options.TrafficPolicy,
 		trafficLinkRate:    options.TrafficLinkRate,
-		trafficCgroupID:    options.TrafficCgroupID,
+		trafficCgroup:      options.TrafficCgroup,
 		telemetryObserver:  options.TelemetryObserver,
 		latencyPolicy:      options.LatencyPolicy,
 	}
 	service.partialCleaner, _ = engine.(PartialCleaner)
+	if service.networkObserver == nil {
+		service.markNetworkReady()
+	}
 	service.waitGroup.Add(1)
 	go service.runScheduler()
 	if service.networkObserver != nil {
@@ -311,7 +346,7 @@ func (service *Service) Handle(ctx context.Context, request ipc.Request) (any, e
 	case ipc.OperationPriority:
 		return service.setPriority(ctx, request.Payload)
 	case ipc.OperationList:
-		return service.list(ctx)
+		return service.list(ctx, request.Payload)
 	case ipc.OperationShow:
 		return service.show(ctx, request.Payload)
 	case ipc.OperationProfile:
@@ -334,6 +369,7 @@ func (service *Service) statusResponse() ipc.Status {
 	service.networkMutex.RLock()
 	snapshot := service.networkSnapshot
 	available := service.networkAvailable
+	networkError := service.networkError
 	service.networkMutex.RUnlock()
 	status.Network = ipc.NetworkStatus{
 		Available:        available,
@@ -344,6 +380,7 @@ func (service *Service) statusResponse() ipc.Status {
 		ConnectionType:   snapshot.ConnectionType,
 		Interface:        snapshot.Interface,
 		Metered:          string(snapshot.Metered),
+		Error:            networkError,
 	}
 	service.profileMutex.RLock()
 	status.ActiveProfile = service.activeProfile
@@ -378,9 +415,14 @@ func (service *Service) Close() error {
 	service.closeOnce.Do(func() {
 		service.cancel()
 		service.waitGroup.Wait()
+		if service.trafficController != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			service.closeErr = service.trafficController.Reconcile(ctx, qos.DesiredState{Policy: qos.PolicyOff})
+			cancel()
+		}
 	})
 
-	return nil
+	return service.closeErr
 }
 
 func (service *Service) add(ctx context.Context, payload json.RawMessage) (ipc.AddResponse, error) {
@@ -401,6 +443,14 @@ func (service *Service) queueDownload(ctx context.Context, download model.Downlo
 	if err := service.store.CreateDownload(ctx, download); err != nil {
 		return ipc.AddResponse{}, fmt.Errorf("persist added download: %w", err)
 	}
+	blocked, err := service.pauseAdmissionOnMetered(ctx, download.ID)
+	if err != nil {
+		return ipc.AddResponse{}, err
+	}
+	if blocked {
+		download.Status = model.StatusPaused
+		return addResponse(download), nil
+	}
 	if err := service.enqueue(ctx, download.ID, download.Priority); err != nil {
 		now := time.Now().UTC()
 		statusErr := service.store.UpdateDownloadStatus(
@@ -414,12 +464,16 @@ func (service *Service) queueDownload(ctx context.Context, download model.Downlo
 	}
 	_ = service.reconcileTrafficPolicy(context.WithoutCancel(ctx))
 
+	return addResponse(download), nil
+}
+
+func addResponse(download model.Download) ipc.AddResponse {
 	return ipc.AddResponse{
 		ID:          download.ID.String(),
 		Filename:    download.Filename,
 		Destination: download.Destination,
 		Status:      string(download.Status),
-	}, nil
+	}
 }
 
 func (service *Service) pause(ctx context.Context, payload json.RawMessage) (ipc.DownloadActionResponse, error) {
@@ -493,8 +547,24 @@ func (service *Service) resume(ctx context.Context, payload json.RawMessage) (ip
 			Status: download.Status,
 		}
 	}
+	if download.Status == model.StatusPaused {
+		blocked, err := service.pauseAdmissionOnMetered(ctx, identifier)
+		if err != nil {
+			return ipc.DownloadActionResponse{}, err
+		}
+		if blocked {
+			return actionResponse(identifier, model.StatusPaused), nil
+		}
+	}
 	if err := service.store.UpdateDownloadStatus(ctx, identifier, status, time.Now().UTC(), ""); err != nil {
 		return ipc.DownloadActionResponse{}, err
+	}
+	blocked, err := service.pauseAdmissionOnMetered(ctx, identifier)
+	if err != nil {
+		return ipc.DownloadActionResponse{}, err
+	}
+	if blocked {
+		return actionResponse(identifier, model.StatusPaused), nil
 	}
 	if err := service.enqueue(ctx, identifier, download.Priority); err != nil {
 		return ipc.DownloadActionResponse{}, err
@@ -673,17 +743,74 @@ func (service *Service) retry(ctx context.Context, payload json.RawMessage) (ipc
 	return service.queueDownload(ctx, download)
 }
 
-func (service *Service) list(ctx context.Context) (ipc.ListResponse, error) {
-	downloads, err := service.store.Downloads(ctx)
+func (service *Service) list(ctx context.Context, payload json.RawMessage) (ipc.ListResponse, error) {
+	request := ipc.ListRequest{}
+	if len(payload) > 0 {
+		if err := decodePayload(payload, &request); err != nil {
+			return ipc.ListResponse{}, InvalidDownloadActionError{Action: "list", Reason: err.Error()}
+		}
+	}
+	if request.Limit == 0 {
+		request.Limit = defaultListPageSize
+	}
+	if request.Limit < 1 || request.Limit > maximumListPageSize {
+		return ipc.ListResponse{}, InvalidDownloadActionError{Action: "list", Reason: "limit must be between 1 and 200"}
+	}
+	cursor, err := decodeDownloadCursor(request.Cursor)
+	if err != nil {
+		return ipc.ListResponse{}, InvalidDownloadActionError{Action: "list", Reason: err.Error()}
+	}
+	downloads, next, more, err := service.store.DownloadPage(ctx, cursor, request.Limit)
 	if err != nil {
 		return ipc.ListResponse{}, err
 	}
 	response := ipc.ListResponse{Downloads: make([]ipc.Download, 0, len(downloads))}
 	for _, download := range downloads {
-		response.Downloads = append(response.Downloads, downloadResponse(download))
+		response.Downloads = append(response.Downloads, downloadSummaryResponse(download))
+	}
+	if more {
+		response.NextCursor, err = encodeDownloadCursor(next)
+		if err != nil {
+			return ipc.ListResponse{}, err
+		}
 	}
 
 	return response, nil
+}
+
+func encodeDownloadCursor(cursor model.DownloadCursor) (string, error) {
+	encoded, err := json.Marshal(struct {
+		CreatedAt time.Time `json:"created_at"`
+		ID        string    `json:"id"`
+	}{CreatedAt: cursor.CreatedAt, ID: cursor.ID.String()})
+	if err != nil {
+		return "", fmt.Errorf("encode download cursor: %w", err)
+	}
+
+	return base64.RawURLEncoding.EncodeToString(encoded), nil
+}
+
+func decodeDownloadCursor(value string) (model.DownloadCursor, error) {
+	if value == "" {
+		return model.DownloadCursor{}, nil
+	}
+	encoded, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil {
+		return model.DownloadCursor{}, fmt.Errorf("cursor is invalid")
+	}
+	var cursor struct {
+		CreatedAt time.Time `json:"created_at"`
+		ID        string    `json:"id"`
+	}
+	if err := decodePayload(encoded, &cursor); err != nil || cursor.CreatedAt.IsZero() {
+		return model.DownloadCursor{}, fmt.Errorf("cursor is invalid")
+	}
+	identifier, err := model.ParseDownloadID(cursor.ID)
+	if err != nil {
+		return model.DownloadCursor{}, fmt.Errorf("cursor is invalid")
+	}
+
+	return model.DownloadCursor{CreatedAt: cursor.CreatedAt, ID: identifier}, nil
 }
 
 func (service *Service) show(ctx context.Context, payload json.RawMessage) (ipc.Download, error) {
@@ -749,8 +876,10 @@ func (service *Service) runScheduler() {
 	defer service.waitGroup.Done()
 	queue := scheduler.NewQueue(service.initial)
 	maximumActive := service.maximumActive
+	networkReady := false
+	networkReadyChannel := (<-chan struct{})(service.networkReady)
 	for {
-		for queue.Active() < maximumActive {
+		for networkReady && queue.Active() < maximumActive {
 			identifier, available := queue.Next()
 			if !available {
 				break
@@ -760,6 +889,9 @@ func (service *Service) runScheduler() {
 		select {
 		case <-service.ctx.Done():
 			return
+		case <-networkReadyChannel:
+			networkReady = true
+			networkReadyChannel = nil
 		case entry := <-service.jobs:
 			queue.Enqueue(entry)
 		case update := <-service.priorities:
@@ -798,6 +930,9 @@ func (service *Service) setProfile(ctx context.Context, payload json.RawMessage)
 	service.latencyPolicy = profile.LatencyPolicy
 	service.profileMutex.Unlock()
 	if err := service.updateSchedulerLimit(ctx, profile.MaximumConcurrentDownloads); err != nil {
+		return ipc.ProfileResponse{}, err
+	}
+	if err := service.reconcileMeteredAdmission(ctx); err != nil {
 		return ipc.ProfileResponse{}, err
 	}
 	qosError := service.reconcileTrafficPolicy(ctx)
@@ -883,6 +1018,10 @@ func (service *Service) process(
 	if download.Status != model.StatusQueued && download.Status != model.StatusDownloading {
 		return
 	}
+	blocked, err := service.pauseAdmissionOnMetered(service.ctx, identifier)
+	if err != nil || blocked {
+		return
+	}
 
 	_ = service.engine.Download(downloadContext, download)
 }
@@ -916,17 +1055,30 @@ func actionResponse(identifier model.DownloadID, status model.Status) ipc.Downlo
 func downloadResponse(download model.Download) ipc.Download {
 	return ipc.Download{
 		ID:              download.ID.String(),
-		URL:             download.URL,
-		Destination:     download.Destination,
-		Filename:        download.Filename,
+		URL:             diagnostic.Display(diagnostic.URL(download.URL)),
+		Destination:     diagnostic.Display(download.Destination),
+		Filename:        diagnostic.Display(download.Filename),
 		TotalSize:       download.TotalSize,
 		DownloadedBytes: download.DownloadedBytes,
 		Status:          string(download.Status),
 		Priority:        string(download.Priority),
 		CreatedAt:       download.CreatedAt,
 		UpdatedAt:       download.UpdatedAt,
-		Error:           download.Error,
+		Error:           diagnostic.Display(diagnostic.Text(download.Error)),
 	}
+}
+
+func downloadSummaryResponse(download model.Download) ipc.Download {
+	response := downloadResponse(download)
+	response.URL = ""
+	response.Destination = ""
+	response.Error = ""
+	filename := []rune(response.Filename)
+	if len(filename) > maximumSummaryFilename {
+		response.Filename = string(filename[:maximumSummaryFilename-1]) + "…"
+	}
+
+	return response
 }
 
 func newDownload(request ipc.AddRequest, priority model.Priority, defaultDestination string) (model.Download, error) {
@@ -954,6 +1106,7 @@ func newDownload(request ipc.AddRequest, priority model.Priority, defaultDestina
 		return model.Download{}, InvalidAddRequestError{Reason: "URL filename cannot be decoded"}
 	}
 	filename = filepath.Base(filename)
+	filename = diagnostic.Filename(filename)
 	if filename == "" || filename == "." || filename == string(filepath.Separator) || strings.TrimSpace(filename) == "" {
 		filename = "download"
 	}

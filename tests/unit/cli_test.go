@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/kristyancarvalho/argo/internal/cli"
 	"github.com/kristyancarvalho/argo/internal/ipc"
 )
@@ -15,6 +17,49 @@ import (
 type cliClient struct {
 	called string
 	watch  bool
+}
+
+type unsafeTerminalClient struct {
+	*cliClient
+}
+
+const unsafeTerminalName = "safe\x1b[31m\x1b]0;title\a\nFAKE\r\t\u202e.iso"
+
+func (client *unsafeTerminalClient) Add(context.Context, string, string) (ipc.AddResponse, error) {
+	return ipc.AddResponse{ID: "id", Filename: unsafeTerminalName, Status: "queued"}, nil
+}
+
+func (client *unsafeTerminalClient) List(context.Context) ([]ipc.Download, error) {
+	return []ipc.Download{{ID: "id", Filename: unsafeTerminalName, Status: "queued", TotalSize: -1}}, nil
+}
+
+func (client *unsafeTerminalClient) Show(context.Context, string) (ipc.Download, error) {
+	return ipc.Download{ID: "id", Filename: unsafeTerminalName, URL: "https://example.test/file", Status: "queued"}, nil
+}
+
+func TestCLIHumanCommandsEscapeUntrustedFilenameControls(t *testing.T) {
+	client := &unsafeTerminalClient{cliClient: &cliClient{}}
+	for _, arguments := range [][]string{{"add", "https://example.test/file"}, {"list"}, {"show", "id"}, {"watch"}} {
+		var output bytes.Buffer
+		if err := cli.Run(context.Background(), client, &output, arguments); err != nil {
+			t.Fatalf("%v returned %v", arguments, err)
+		}
+		assertTerminalSafeOutput(t, output.String())
+	}
+}
+
+func assertTerminalSafeOutput(t *testing.T, output string) {
+	t.Helper()
+	for _, character := range []rune{'\x1b', '\a', '\r', '\t', '\u202e'} {
+		if strings.ContainsRune(output, character) {
+			t.Fatalf("output contains control U+%04X: %q", character, output)
+		}
+	}
+	for _, line := range strings.Split(output, "\n") {
+		if line == "FAKE" {
+			t.Fatalf("filename fabricated an output row: %q", output)
+		}
+	}
 }
 
 func (client *cliClient) Add(_ context.Context, rawURL, _ string) (ipc.AddResponse, error) {
@@ -133,6 +178,53 @@ func TestCLIStatusShowsNetworkAndProfile(t *testing.T) {
 		if !strings.Contains(output.String(), value) {
 			t.Fatalf("status output %q does not contain %q", output.String(), value)
 		}
+	}
+}
+
+type secretShowClient struct {
+	*cliClient
+}
+
+func (client *secretShowClient) Show(context.Context, string) (ipc.Download, error) {
+	return ipc.Download{
+		ID: "secret", URL: "https://user:password@example.test/file?token=secret",
+		Error: "GET https://user:password@example.test/file?token=secret: failed",
+	}, nil
+}
+
+func TestCLIShowRedactsSourceAndErrorSecrets(t *testing.T) {
+	var output bytes.Buffer
+	client := &secretShowClient{cliClient: &cliClient{}}
+	if err := cli.Run(context.Background(), client, &output, []string{"show", "secret"}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(output.String(), "password") || strings.Contains(output.String(), "token=secret") ||
+		!strings.Contains(output.String(), "https://redacted@example.test/file?redacted") {
+		t.Fatalf("show output did not redact secrets: %q", output.String())
+	}
+}
+
+type unavailableNetworkClient struct {
+	*cliClient
+}
+
+func (client *unavailableNetworkClient) Status(context.Context) (ipc.Status, error) {
+	status, err := client.cliClient.Status(context.Background())
+	status.Network.Available = false
+	status.Network.Error = "NetworkManager disconnected"
+
+	return status, err
+}
+
+func TestCLIStatusShowsNetworkObserverFailure(t *testing.T) {
+	client := &unavailableNetworkClient{cliClient: &cliClient{}}
+	var output bytes.Buffer
+	if err := cli.Run(context.Background(), client, &output, []string{"status"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "Network: unavailable") ||
+		!strings.Contains(output.String(), "Network error: NetworkManager disconnected") {
+		t.Fatalf("status output does not expose observer failure: %q", output.String())
 	}
 }
 
@@ -340,6 +432,11 @@ type redrawWatchClient struct {
 	calls int
 }
 
+type geometryWatchClient struct {
+	*cliClient
+	calls int
+}
+
 func (client *redrawWatchClient) List(context.Context) ([]ipc.Download, error) {
 	client.calls++
 	status := "downloading"
@@ -382,4 +479,84 @@ func TestCLIWatchNonInteractiveEmitsOnePlainSnapshot(t *testing.T) {
 	if strings.Contains(output.String(), "\x1b[") || !strings.Contains(output.String(), "downloading") {
 		t.Fatalf("non-interactive watch output is not a plain snapshot: %q", output.String())
 	}
+}
+
+func TestCLIWatchFitsTerminalWidthAndHeight(t *testing.T) {
+	for _, width := range []int{32, 80, 120} {
+		t.Run(fmt.Sprintf("width-%d", width), func(t *testing.T) {
+			client := &geometryWatchClient{cliClient: &cliClient{}, calls: 1}
+			var output bytes.Buffer
+			if err := cli.RunWithOptions(
+				context.Background(), client, &output, []string{"watch"}, cli.Options{
+					Interactive: true,
+					TerminalSize: func() (int, int) {
+						return width, 6
+					},
+				},
+			); err != nil {
+				t.Fatal(err)
+			}
+			lines := strings.Split(strings.TrimSuffix(output.String(), "\n"), "\n")
+			if len(lines) > 5 {
+				t.Fatalf("rendered %d rows into a six-row terminal", len(lines))
+			}
+			for _, line := range lines {
+				if measured := ansi.StringWidth(ansi.Strip(line)); measured > width {
+					t.Fatalf("line occupies %d cells at width %d: %q", measured, width, line)
+				}
+			}
+			if !strings.Contains(output.String(), "more") {
+				t.Fatalf("oversized list was not visibly clipped: %q", output.String())
+			}
+		})
+	}
+}
+
+func TestCLIWatchClearsAndRecomputesRegionAfterResize(t *testing.T) {
+	client := &geometryWatchClient{cliClient: &cliClient{}}
+	sizes := [][2]int{{120, 7}, {32, 5}}
+	index := 0
+	var output bytes.Buffer
+	if err := cli.RunWithOptions(
+		context.Background(), client, &output, []string{"watch"}, cli.Options{
+			Interactive: true,
+			TerminalSize: func() (int, int) {
+				size := sizes[min(index, len(sizes)-1)]
+				index++
+				return size[0], size[1]
+			},
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "\x1b[2J\x1b[H") {
+		t.Fatalf("resize did not clear stale wrapped rows: %q", output.String())
+	}
+	afterResize := output.String()[strings.LastIndex(output.String(), "\x1b[H")+len("\x1b[H"):]
+	for _, line := range strings.Split(strings.TrimSuffix(afterResize, "\n"), "\n") {
+		if measured := ansi.StringWidth(ansi.Strip(line)); measured > 32 {
+			t.Fatalf("resized line occupies %d cells: %q", measured, line)
+		}
+	}
+}
+
+func (client *geometryWatchClient) List(context.Context) ([]ipc.Download, error) {
+	client.calls++
+	status := "downloading"
+	if client.calls > 1 {
+		status = "completed"
+	}
+	downloads := make([]ipc.Download, 0, 20)
+	for index := range 20 {
+		downloads = append(downloads, ipc.Download{
+			ID:              fmt.Sprintf("download-%02d", index),
+			Filename:        strings.Repeat("界", 80) + fmt.Sprintf("-%02d.bin", index),
+			Status:          status,
+			Priority:        "normal",
+			DownloadedBytes: int64(index),
+			TotalSize:       100,
+		})
+	}
+
+	return downloads, nil
 }

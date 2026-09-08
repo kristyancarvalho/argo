@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/kristyancarvalho/argo/internal/model"
+	"golang.org/x/sys/unix"
 )
 
 type ChunkProgress struct {
@@ -89,7 +90,7 @@ func (engine *Engine) downloadParallel(
 			results <- engine.downloadChunk(
 				workerContext,
 				download,
-				metadata.TotalSize,
+				metadata,
 				partial,
 				chunk,
 				downloaded,
@@ -116,38 +117,22 @@ func (engine *Engine) downloadParallel(
 	if err := partial.Sync(); err != nil {
 		return engine.fail(ctx, download.ID, fmt.Errorf("sync parallel partial file: %w", err))
 	}
-	if err := partial.Close(); err != nil {
-		partialOpen = false
-		return engine.fail(ctx, download.ID, fmt.Errorf("close parallel partial file: %w", err))
-	}
-	partialOpen = false
-	finalPath, err = engine.finalize(download, finalPath)
+	finalPath, err = engine.finalize(download, finalPath, partial)
 	if err != nil {
-		return engine.fail(ctx, download.ID, err)
-	}
-	filename := filepath.Base(finalPath)
-	if filename != download.Filename {
-		if err := engine.store.UpdateDownloadFilename(ctx, download.ID, filename, engine.now()); err != nil {
-			return engine.fail(ctx, download.ID, err)
-		}
-	}
-	if err := engine.store.UpdateDownloadStatus(
-		ctx,
-		download.ID,
-		model.StatusCompleted,
-		engine.now(),
-		"",
-	); err != nil {
 		return err
 	}
-
-	return nil
+	if err := partial.Close(); err != nil {
+		partialOpen = false
+		return engine.fail(ctx, download.ID, fmt.Errorf("close finalized parallel partial file: %w", err))
+	}
+	partialOpen = false
+	return engine.completeCurrentFinalization(ctx, download, finalPath)
 }
 
 func (engine *Engine) downloadChunk(
 	ctx context.Context,
 	download model.Download,
-	totalSize int64,
+	metadata RemoteMetadata,
 	destination *os.File,
 	chunk Chunk,
 	downloaded int64,
@@ -160,6 +145,7 @@ func (engine *Engine) downloadChunk(
 	}
 	requestStart := chunk.Start + downloaded
 	request.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", requestStart, chunk.End))
+	bindRepresentation(request, metadata)
 	response, err := engine.httpClient.Do(request)
 	if err != nil {
 		return fmt.Errorf("request chunk %d: %w", chunk.Index, err)
@@ -167,12 +153,15 @@ func (engine *Engine) downloadChunk(
 	defer func() {
 		_ = response.Body.Close()
 	}()
+	if err := validateRepresentation(response, metadata); err != nil {
+		return err
+	}
 	if response.StatusCode != http.StatusPartialContent {
 		return HTTPStatusError{StatusCode: response.StatusCode, Status: response.Status}
 	}
 	contentRange := response.Header.Get("Content-Range")
 	start, end, responseTotal, err := parseContentRange(contentRange)
-	if err != nil || start != requestStart || end != chunk.End || responseTotal != totalSize {
+	if err != nil || start != requestStart || end != chunk.End || responseTotal != metadata.TotalSize {
 		return RangeMismatchError{Chunk: chunk, ContentRange: contentRange}
 	}
 
@@ -314,7 +303,7 @@ func (engine *Engine) prepareParallelFile(download model.Download, totalSize int
 	if err := engine.preparePartial(download); err != nil {
 		return nil, "", 0, err
 	}
-	partial, err := os.OpenFile(engine.partialPath(download.ID), os.O_CREATE|os.O_RDWR, 0o600)
+	partial, err := engine.openPartialFile(download.ID, unix.O_CREAT|unix.O_RDWR)
 	if err != nil {
 		return nil, "", 0, fmt.Errorf("create parallel partial file: %w", err)
 	}

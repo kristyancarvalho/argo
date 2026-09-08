@@ -75,7 +75,7 @@ func (service *Service) reconcileTrafficPolicy(ctx context.Context) (resultErr e
 		environment := qos.PolicyEnvironment{
 			Interface:             snapshot.Interface,
 			LinkRateBitsPerSecond: service.trafficLinkRate,
-			CgroupID:              service.trafficCgroupID,
+			Cgroup:                service.trafficCgroup,
 			ActiveDownloads:       active,
 		}
 		if policy == qos.PolicyLatency && latencyPolicy != nil {

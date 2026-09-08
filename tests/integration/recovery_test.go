@@ -204,7 +204,11 @@ func startDownloadDaemon(t *testing.T, store *storage.Store) runningDownloadDaem
 		cancel()
 		t.Fatal(err)
 	}
-	server, err := ipc.Listen(filepath.Join(t.TempDir(), "argod.sock"), service)
+	socketDirectory := t.TempDir()
+	if err := os.Chmod(socketDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	server, err := ipc.Listen(filepath.Join(socketDirectory, "argod.sock"), service)
 	if err != nil {
 		cancel()
 		_ = service.Close()

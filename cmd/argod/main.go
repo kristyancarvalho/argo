@@ -138,7 +138,7 @@ func run(arguments []string) (runError error) {
 	if *resumeAfterMetered && !*pauseOnMetered {
 		return fmt.Errorf("resume after metered requires pause on metered")
 	}
-	cgroupID, _ := qos.CurrentCgroupID()
+	cgroup, _ := qos.CurrentCgroup()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -151,6 +151,13 @@ func run(arguments []string) (runError error) {
 	if err != nil {
 		return err
 	}
+	instanceLock, err := storage.AcquireInstanceLock(databasePath)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		runError = errors.Join(runError, instanceLock.Close())
+	}()
 	store, err := storage.Open(ctx, databasePath)
 	if err != nil {
 		return err
@@ -206,7 +213,7 @@ func run(arguments []string) (runError error) {
 		Profiles:                   profiles,
 		TrafficPolicy:              policy,
 		TrafficLinkRate:            uint64(configuredLinkRate),
-		TrafficCgroupID:            cgroupID,
+		TrafficCgroup:              cgroup,
 		TrafficBackend:             qosipc.NewClient(qosipc.DefaultSocketPath),
 		TelemetryObserver:          telemetryObserver,
 		LatencyPolicy:              latencyPolicy,

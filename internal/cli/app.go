@@ -7,6 +7,7 @@ import (
 	"io"
 	"text/tabwriter"
 
+	"github.com/kristyancarvalho/argo/internal/diagnostic"
 	"github.com/kristyancarvalho/argo/internal/ipc"
 )
 
@@ -31,6 +32,7 @@ func Run(ctx context.Context, client Client, output io.Writer, arguments []strin
 }
 
 func RunWithOptions(ctx context.Context, client Client, output io.Writer, arguments []string, options Options) error {
+	terminalOutput := output
 	if options.Color {
 		output = styledWriter{output: output}
 	}
@@ -64,7 +66,7 @@ func RunWithOptions(ctx context.Context, client Client, output io.Writer, argume
 	case "priority":
 		return runPriority(ctx, client, output, operands)
 	case "watch":
-		return runWatch(ctx, client, output, operands, options.Interactive)
+		return runWatch(ctx, client, output, terminalOutput, operands, options)
 	case "status":
 		return runStatus(ctx, client, output, operands)
 	case "profile":
@@ -133,7 +135,7 @@ func runPolicy(ctx context.Context, client Client, output io.Writer, arguments [
 	if policy.Applied {
 		state = "active"
 	}
-	_, err = fmt.Fprintf(output, "Traffic policy: %s (%s)\n", policy.Policy, state)
+	_, err = fmt.Fprintf(output, "Traffic policy: %s (%s)\n", diagnostic.Display(policy.Policy), state)
 
 	return err
 }
@@ -153,14 +155,14 @@ func runProfile(ctx context.Context, client Client, output io.Writer, arguments 
 	if _, err = fmt.Fprintf(
 		output,
 		"Active profile: %s\nTraffic policy: %s (%s)\n",
-		profile.Name,
+		diagnostic.Display(profile.Name),
 		statusValue(profile.Policy),
 		state,
 	); err != nil {
 		return err
 	}
 	if profile.QoSError != "" {
-		_, err = fmt.Fprintf(output, "QoS warning: %s\n", profile.QoSError)
+		_, err = fmt.Fprintf(output, "QoS warning: %s\n", diagnostic.Display(diagnostic.Text(profile.QoSError)))
 	}
 
 	return err
@@ -174,7 +176,7 @@ func runAdd(ctx context.Context, client Client, output io.Writer, arguments []st
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(output, "Added %s %s (%s)\n", response.ID, response.Filename, response.Status)
+	_, err = fmt.Fprintf(output, "Added %s %s (%s)\n", diagnostic.Display(response.ID), diagnostic.Display(response.Filename), diagnostic.Display(response.Status))
 
 	return err
 }
@@ -200,7 +202,7 @@ func runRetry(ctx context.Context, client Client, output io.Writer, arguments []
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(output, "Added %s %s (%s)\n", response.ID, response.Filename, response.Status)
+	_, err = fmt.Fprintf(output, "Added %s %s (%s)\n", diagnostic.Display(response.ID), diagnostic.Display(response.Filename), diagnostic.Display(response.Status))
 
 	return err
 }
@@ -221,10 +223,10 @@ func runList(ctx context.Context, client Client, output io.Writer, arguments []s
 		if _, err := fmt.Fprintf(
 			writer,
 			"%s\t%s\t%s\t%s\n",
-			download.ID,
-			download.Status,
+			diagnostic.Display(download.ID),
+			diagnostic.Display(download.Status),
 			formatProgress(download),
-			download.Filename,
+			diagnostic.Display(download.Filename),
 		); err != nil {
 			return err
 		}
@@ -244,14 +246,14 @@ func runShow(ctx context.Context, client Client, output io.Writer, arguments []s
 	_, err = fmt.Fprintf(
 		output,
 		"ID: %s\nFilename: %s\nURL: %s\nDestination: %s\nStatus: %s\nPriority: %s\nProgress: %s\nError: %s\n",
-		download.ID,
-		download.Filename,
-		download.URL,
-		download.Destination,
-		download.Status,
-		download.Priority,
+		diagnostic.Display(download.ID),
+		diagnostic.Display(download.Filename),
+		diagnostic.Display(diagnostic.URL(download.URL)),
+		diagnostic.Display(download.Destination),
+		diagnostic.Display(download.Status),
+		diagnostic.Display(download.Priority),
 		formatProgress(download),
-		download.Error,
+		diagnostic.Display(diagnostic.Text(download.Error)),
 	)
 
 	return err
@@ -271,18 +273,25 @@ func runAction(
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(output, "%s: %s\n", response.ID, response.Status)
+	_, err = fmt.Fprintf(output, "%s: %s\n", diagnostic.Display(response.ID), diagnostic.Display(response.Status))
 
 	return err
 }
 
-func runWatch(ctx context.Context, client Client, output io.Writer, arguments []string, interactive bool) error {
+func runWatch(
+	ctx context.Context,
+	client Client,
+	output io.Writer,
+	terminalOutput io.Writer,
+	arguments []string,
+	options Options,
+) error {
 	if len(arguments) != 0 {
 		return UsageError{Message: "argo watch"}
 	}
 
 	watcher := NewWatcher(client)
-	if !interactive {
+	if !options.Interactive {
 		snapshot, err := watcher.Snapshot(ctx)
 		if err != nil {
 			return err
@@ -290,7 +299,11 @@ func runWatch(ctx context.Context, client Client, output io.Writer, arguments []
 
 		return renderWatchSnapshot(output, snapshot)
 	}
-	renderer := newWatchRegionRenderer(output)
+	size := options.TerminalSize
+	if size == nil {
+		size = watchTerminalSize(terminalOutput)
+	}
+	renderer := newWatchRegionRenderer(output, size)
 	err := watcher.Stream(ctx, renderer.Render)
 	if errors.Is(err, context.Canceled) {
 		return nil
@@ -307,7 +320,7 @@ func runPriority(ctx context.Context, client Client, output io.Writer, arguments
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(output, "%s: %s\n", response.ID, response.Priority)
+	_, err = fmt.Fprintf(output, "%s: %s\n", diagnostic.Display(response.ID), diagnostic.Display(response.Priority))
 
 	return err
 }
@@ -329,11 +342,11 @@ func runStatus(ctx context.Context, client Client, output io.Writer, arguments [
 	_, err = fmt.Fprintf(
 		output,
 		"Daemon: %s\nPID: %d\nStarted: %s\nProtocol: %d\nNetwork: %s\nInterface: %s\nConnection type: %s\nMetered: %s\nActive profile: %s\n",
-		status.State,
+		diagnostic.Display(status.State),
 		status.PID,
 		status.StartedAt.Format("2006-01-02 15:04:05Z07:00"),
 		status.ProtocolVersion,
-		networkState,
+		diagnostic.Display(networkState),
 		statusValue(status.Network.Interface),
 		statusValue(status.Network.ConnectionType),
 		statusValue(status.Network.Metered),
@@ -355,7 +368,12 @@ func runStatus(ctx context.Context, client Client, output io.Writer, arguments [
 		return err
 	}
 	if status.Traffic.Error != "" {
-		if _, err = fmt.Fprintf(output, "QoS error: %s\n", status.Traffic.Error); err != nil {
+		if _, err = fmt.Fprintf(output, "QoS error: %s\n", diagnostic.Display(diagnostic.Text(status.Traffic.Error))); err != nil {
+			return err
+		}
+	}
+	if status.Network.Error != "" {
+		if _, err = fmt.Fprintf(output, "Network error: %s\n", diagnostic.Display(diagnostic.Text(status.Network.Error))); err != nil {
 			return err
 		}
 	}
@@ -394,7 +412,7 @@ func statusValue(value string) string {
 		return "unknown"
 	}
 
-	return value
+	return diagnostic.Display(value)
 }
 
 func formatProgress(download ipc.Download) string {

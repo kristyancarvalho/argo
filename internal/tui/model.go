@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/kristyancarvalho/argo/internal/console"
+	"github.com/kristyancarvalho/argo/internal/diagnostic"
 	"github.com/kristyancarvalho/argo/internal/ipc"
+	"github.com/kristyancarvalho/argo/internal/telemetry"
 )
 
 const (
@@ -43,7 +45,9 @@ type errorMessage struct {
 	err error
 }
 
-type refreshMessage struct{}
+type refreshMessage struct {
+	generation uint64
+}
 
 type actionResultMessage struct {
 	message string
@@ -93,10 +97,15 @@ type Model struct {
 	height    int
 	offset    int
 	help      bool
+	tick      func(time.Duration, func(time.Time) tea.Msg) tea.Cmd
+	refresh   uint64
+	pending   bool
+	confirmID string
 }
 
 type Options struct {
 	Color bool
+	Tick  func(time.Duration, func(time.Time) tea.Msg) tea.Cmd
 }
 
 func NewModel(ctx context.Context, client Client) (Model, error) {
@@ -108,6 +117,10 @@ func NewModelWithOptions(ctx context.Context, client Client, options Options) (M
 		return Model{}, fmt.Errorf("TUI requires context and daemon client")
 	}
 
+	if options.Tick == nil {
+		options.Tick = tea.Tick
+	}
+
 	return Model{
 		ctx:      ctx,
 		client:   client,
@@ -115,6 +128,7 @@ func NewModelWithOptions(ctx context.Context, client Client, options Options) (M
 		etas:     make(map[string]time.Duration),
 		previous: make(map[string]transferPoint),
 		color:    options.Color,
+		tick:     options.Tick,
 	}, nil
 }
 
@@ -125,9 +139,12 @@ func (model Model) Init() tea.Cmd {
 func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch message := message.(type) {
 	case tea.KeyMsg:
+		if message.Type == tea.KeyCtrlC {
+			return model, tea.Quit
+		}
 		if model.help {
 			switch message.String() {
-			case "q", "ctrl+c":
+			case "q":
 				return model, tea.Quit
 			case "?", "esc":
 				model.help = false
@@ -178,6 +195,7 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 			model.mode = inputModeCancel
+			model.confirmID = model.downloads[model.selected].ID
 			model.clearActionStatus()
 		case "x":
 			if !model.hasSelection() {
@@ -185,9 +203,11 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 			model.mode = inputModeRemove
+			model.confirmID = model.downloads[model.selected].ID
 			model.clearActionStatus()
 		case "C":
 			model.mode = inputModeClear
+			model.confirmID = ""
 			model.clearActionStatus()
 		case "R":
 			return model.dispatchSelected("retry")
@@ -202,16 +222,20 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case snapshotMessage:
 		model.applySnapshot(message)
-		return model, refreshAfter(time.Second)
+		return model, model.scheduleRefresh(time.Second)
 	case errorMessage:
 		model.err = message.err
 		model.ready = true
-		return model, refreshAfter(time.Second)
+		return model, model.scheduleRefresh(time.Second)
 	case actionResultMessage:
 		model.actionErr = message.err
 		model.notice = message.message
 		return model, model.loadSnapshot
 	case refreshMessage:
+		if !model.pending || message.generation != model.refresh {
+			return model, nil
+		}
+		model.pending = false
 		return model, model.loadSnapshot
 	case tea.WindowSizeMsg:
 		model.width = message.Width
@@ -225,12 +249,15 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 func (model Model) View() string {
 	var view strings.Builder
 	width := model.viewWidth()
+	if model.height > 0 && model.height < 18 {
+		return model.compactView(width)
+	}
 	title := console.Paint(model.color, console.Cyan, console.Paint(model.color, console.Bold, "Argo"))
 	daemon := "Daemon: " + statusValue(model.status.State)
 	if !model.ready {
 		daemon = "Daemon: connecting"
 	}
-	spaces := max(1, width-4-utf8.RuneCountInString(daemon))
+	spaces := max(1, width-4-ansi.StringWidth(daemon))
 	view.WriteString(title)
 	view.WriteString(strings.Repeat(" ", spaces))
 	view.WriteString(console.Paint(model.color, statusColor(model.status.State), daemon))
@@ -239,14 +266,14 @@ func (model Model) View() string {
 	view.WriteByte('\n')
 	if model.help {
 		model.renderHelp(&view)
-		return view.String()
+		return model.boundView(view.String())
 	}
 	switch {
 	case !model.ready:
 		view.WriteString(console.Paint(model.color, console.Yellow, "Connecting to daemon..."))
 		view.WriteByte('\n')
 	case model.err != nil:
-		view.WriteString(console.Paint(model.color, console.Red, "Daemon unavailable: "+model.err.Error()))
+		view.WriteString(console.Paint(model.color, console.Red, "Daemon unavailable: "+diagnostic.Display(diagnostic.Text(model.err.Error()))))
 		view.WriteByte('\n')
 	default:
 		model.renderNetworkAndQoS(&view)
@@ -263,43 +290,153 @@ func (model Model) View() string {
 		}
 		view.WriteString("\n")
 		view.WriteString(console.Paint(model.color, console.Cyan, label))
-		view.WriteString(model.input)
+		view.WriteString(diagnostic.Display(model.input))
 		view.WriteString("\nEnter submit  Esc cancel\n")
-		return view.String()
+		return model.boundView(view.String())
 	}
-	if model.mode == inputModeCancel || model.mode == inputModeRemove || model.mode == inputModeClear {
+	if model.mode == inputModeClear ||
+		((model.mode == inputModeCancel || model.mode == inputModeRemove) && model.confirmID != "") {
 		prompt := "Clear completed, failed, and canceled history? y/N"
-		if model.mode == inputModeCancel && model.hasSelection() {
-			prompt = fmt.Sprintf("Cancel %s? y/N", model.downloads[model.selected].ID)
+		if model.mode == inputModeCancel && model.confirmID != "" {
+			prompt = fmt.Sprintf("Cancel %s? y/N", diagnostic.Display(model.confirmID))
 		}
-		if model.mode == inputModeRemove && model.hasSelection() {
-			prompt = fmt.Sprintf("Remove %s from history? y/N", model.downloads[model.selected].ID)
+		if model.mode == inputModeRemove && model.confirmID != "" {
+			prompt = fmt.Sprintf("Remove %s from history? y/N", diagnostic.Display(model.confirmID))
 		}
 		view.WriteString(console.Paint(model.color, console.Yellow, "\n"+prompt+"\n"))
-		return view.String()
+		return model.boundView(view.String())
 	}
 	if model.mode == inputModePolicy {
 		view.WriteString(console.Paint(model.color, console.Cyan, "\nSelect traffic policy: 1 off  2 balanced  3 throughput  4 latency  5 focus  Esc cancel\n"))
-		return view.String()
+		return model.boundView(view.String())
 	}
 	if model.actionErr != nil {
-		view.WriteString(console.Paint(model.color, console.Red, "\nAction failed: "+model.actionErr.Error()))
+		view.WriteString(console.Paint(model.color, console.Red, "\nAction failed: "+diagnostic.Display(diagnostic.Text(model.actionErr.Error()))))
 		view.WriteByte('\n')
 	} else if model.notice != "" {
 		view.WriteString("\n")
-		view.WriteString(console.Paint(model.color, console.Green, model.notice))
+		view.WriteString(console.Paint(model.color, console.Green, diagnostic.Display(model.notice)))
 		view.WriteByte('\n')
 	}
-	if width < 72 {
-		view.WriteString(console.Paint(model.color, console.Dim, "\nup/down select  a add\n"))
-		view.WriteString(console.Paint(model.color, console.Dim, "p pause  r resume  R retry\n"))
-		view.WriteString(console.Paint(model.color, console.Dim, "c cancel  x remove  C clear\n"))
-		view.WriteString(console.Paint(model.color, console.Dim, "? help  q quit\n"))
+	if width < 96 {
+		view.WriteString(console.Paint(model.color, console.Dim, "\na add  p pause  r resume\n"))
+		view.WriteString(console.Paint(model.color, console.Dim, "R retry  c cancel  x remove\n"))
+		view.WriteString(console.Paint(model.color, console.Dim, "C clear  ? help  q quit\n"))
 	} else {
 		view.WriteString(console.Paint(model.color, console.Dim, "\nup/down select  a add  p pause  r resume  R retry  c cancel  x remove  C clear  ? help  q quit\n"))
 	}
 
-	return view.String()
+	return model.boundView(view.String())
+}
+
+func (model Model) compactView(width int) string {
+	lines := make([]string, 0, max(model.height, 1))
+	daemon := statusValue(model.status.State)
+	if !model.ready {
+		daemon = "connecting"
+	}
+	lines = append(lines, console.Paint(model.color, console.Cyan, "Argo")+"  daemon: "+daemon)
+	if model.help {
+		lines = append(lines,
+			"Help",
+			"up/down or k/j  select",
+			"a add  p pause  r resume",
+			"R retry  c cancel",
+			"x remove  C clear",
+			"1/2/3 priority",
+			"t policy  f profile",
+			"? or Esc close",
+			"q quit",
+		)
+		return model.boundView(strings.Join(lines, "\n") + "\n")
+	}
+	if !model.ready {
+		lines = append(lines, "Connecting to daemon...", "? help  q quit")
+		return model.boundView(strings.Join(lines, "\n") + "\n")
+	}
+	if model.err != nil {
+		lines = append(lines, "Daemon unavailable: "+diagnostic.Display(diagnostic.Text(model.err.Error())), "? help  q quit")
+		return model.boundView(strings.Join(lines, "\n") + "\n")
+	}
+	networkState := model.status.Network.State
+	if !model.status.Network.Available {
+		networkState = "unavailable"
+	} else if !model.status.Network.Connected {
+		networkState = "disconnected"
+	} else if networkState == "" {
+		networkState = "connected"
+	}
+	lines = append(lines,
+		fmt.Sprintf("net: %s  policy: %s", diagnostic.Display(networkState), statusValue(model.status.Traffic.Policy)),
+		"Downloads",
+	)
+	start, end := model.visibleBounds()
+	if len(model.downloads) == 0 {
+		lines = append(lines, "  No downloads.")
+	} else {
+		for index := start; index < end; index++ {
+			download := model.downloads[index]
+			marker := " "
+			if index == model.selected {
+				marker = ">"
+			}
+			filename := truncateCells(diagnostic.Display(download.Filename), max(1, width-ansi.StringWidth(download.Status)-4))
+			line := fmt.Sprintf("%s %s  %s", marker, filename, diagnostic.Display(download.Status))
+			lines = append(lines, console.Paint(model.color, statusColor(download.Status), line))
+		}
+	}
+	contextLine := ""
+	switch model.mode {
+	case inputModeAdd:
+		contextLine = "Add URL: " + diagnostic.Display(model.input)
+	case inputModeProfile:
+		contextLine = "Profile: " + diagnostic.Display(model.input)
+	case inputModePolicy:
+		contextLine = "Policy: 1 off 2 balanced 3 throughput 4 latency 5 focus"
+	case inputModeClear:
+		contextLine = "Clear history? y/N"
+	case inputModeCancel:
+		if model.confirmID != "" {
+			contextLine = "Cancel " + diagnostic.Display(model.confirmID) + "? y/N"
+		}
+	case inputModeRemove:
+		if model.confirmID != "" {
+			contextLine = "Remove " + diagnostic.Display(model.confirmID) + "? y/N"
+		}
+	case inputModeNone:
+	}
+	if contextLine == "" && model.actionErr != nil {
+		contextLine = "Failed: " + diagnostic.Display(diagnostic.Text(model.actionErr.Error()))
+	}
+	if contextLine == "" && model.notice != "" {
+		contextLine = diagnostic.Display(model.notice)
+	}
+	if contextLine == "" && model.hasSelection() {
+		download := model.downloads[model.selected]
+		contextLine = shortID(download.ID) + "  " + diagnostic.Display(download.Priority)
+	}
+	lines = append(lines, contextLine, "a add  ? help  q quit")
+
+	return model.boundView(strings.Join(lines, "\n") + "\n")
+}
+
+func (model Model) boundView(value string) string {
+	width := model.viewWidth()
+	logical := strings.Split(strings.TrimSuffix(value, "\n"), "\n")
+	lines := make([]string, 0, len(logical))
+	for _, line := range logical {
+		lines = append(lines, ansi.Truncate(line, width, "…"))
+	}
+	if model.height > 0 && len(lines) > model.height {
+		if model.height == 1 {
+			lines = lines[len(lines)-1:]
+		} else {
+			last := lines[len(lines)-1]
+			lines = append(lines[:model.height-1], last)
+		}
+	}
+
+	return strings.Join(lines, "\n") + "\n"
 }
 
 func (model Model) renderDownloads(view *strings.Builder, width int) {
@@ -319,17 +456,17 @@ func (model Model) renderDownloads(view *strings.Builder, width int) {
 		}
 		speed := model.speeds[download.ID]
 		var row string
-		if width < 72 {
-			filename := truncateRunes(download.Filename, max(12, width-4))
+		if width < 96 {
+			filename := truncateCells(diagnostic.Display(download.Filename), max(4, width-4))
 			row = fmt.Sprintf("%s %s\n  %s  %s  %s\n  %s  ETA %s  %s\n",
-				marker, filename, shortID(download.ID), download.Status, formatTUIProgress(download),
-				formatTUISpeed(speed), model.formatTUIETA(download), download.Priority)
+				marker, filename, shortID(download.ID), diagnostic.Display(download.Status), formatTUIProgress(download),
+				formatTUISpeed(speed), model.formatTUIETA(download), diagnostic.Display(download.Priority))
 		} else {
 			filenameWidth := max(14, width-65)
-			row = fmt.Sprintf("%s %-*s %12s %10s %8s %-11s %-6s %s\n",
-				marker, filenameWidth, truncateRunes(download.Filename, filenameWidth),
+			row = fmt.Sprintf("%s %s %12s %10s %8s %-11s %-6s %s\n",
+				marker, padCells(diagnostic.Display(download.Filename), filenameWidth),
 				formatTUIProgress(download), formatTUISpeed(speed), model.formatTUIETA(download),
-				download.Status, download.Priority, shortID(download.ID))
+				diagnostic.Display(download.Status), diagnostic.Display(download.Priority), shortID(download.ID))
 		}
 		color := statusColor(download.Status)
 		if index == model.selected {
@@ -351,13 +488,13 @@ func (model Model) renderSelected(view *strings.Builder, width int) {
 	view.WriteString(console.Paint(model.color, console.Bold, "Selected"))
 	view.WriteByte('\n')
 	if model.height > 0 && model.height < 22 {
-		_, _ = fmt.Fprintf(view, "  %s  %s  %s\n", shortID(download.ID), download.Status, download.Priority)
-		_, _ = fmt.Fprintf(view, "  %s\n", truncateRunes(download.Filename, max(8, width-4)))
+		_, _ = fmt.Fprintf(view, "  %s  %s  %s\n", shortID(download.ID), diagnostic.Display(download.Status), diagnostic.Display(download.Priority))
+		_, _ = fmt.Fprintf(view, "  %s\n", truncateCells(diagnostic.Display(download.Filename), max(4, width-4)))
 		return
 	}
-	_, _ = fmt.Fprintf(view, "  ID: %s\n  State: %s    Priority: %s\n", download.ID, download.Status, download.Priority)
-	_, _ = fmt.Fprintf(view, "  File: %s\n", truncateRunes(download.Filename, max(8, width-8)))
-	_, _ = fmt.Fprintf(view, "  Source: %s\n", truncateRunes(download.URL, max(8, width-10)))
+	_, _ = fmt.Fprintf(view, "  ID: %s\n  State: %s    Priority: %s\n", diagnostic.Display(download.ID), diagnostic.Display(download.Status), diagnostic.Display(download.Priority))
+	_, _ = fmt.Fprintf(view, "  File: %s\n", truncateCells(diagnostic.Display(download.Filename), max(4, width-8)))
+	_, _ = fmt.Fprintf(view, "  Source: %s\n", truncateCells(diagnostic.Display(diagnostic.URL(download.URL)), max(4, width-10)))
 }
 
 func (model Model) renderHelp(view *strings.Builder) {
@@ -383,45 +520,40 @@ func (model Model) renderNetworkAndQoS(view *strings.Builder) {
 	} else if networkState == "" {
 		networkState = "connected"
 	}
-	if model.height > 0 && model.height < 22 {
-		_, _ = fmt.Fprintf(view, "Network: %s  Interface: %s\n", networkState, statusValue(model.status.Network.Interface))
+	if model.viewWidth() < 96 || model.height > 0 && model.height < 22 {
+		_, _ = fmt.Fprintf(view, "Network: %s  Interface: %s\n", diagnostic.Display(networkState), statusValue(model.status.Network.Interface))
 		_, _ = fmt.Fprintf(view, "Profile: %s  Traffic policy: %s\n", statusValue(model.status.ActiveProfile), statusValue(model.status.Traffic.Policy))
 		if model.status.Traffic.Error != "" {
-			view.WriteString(console.Paint(model.color, console.Red, "QoS error: "+model.status.Traffic.Error))
+			view.WriteString(console.Paint(model.color, console.Red, "QoS error: "+diagnostic.Display(diagnostic.Text(model.status.Traffic.Error))))
+			view.WriteByte('\n')
+		}
+		if model.status.Network.Error != "" {
+			view.WriteString(console.Paint(model.color, console.Red, "Network error: "+diagnostic.Display(diagnostic.Text(model.status.Network.Error))))
 			view.WriteByte('\n')
 		}
 		return
 	}
-	if model.viewWidth() < 72 {
-		_, _ = fmt.Fprintf(
-			view,
-			"Network: %s\nInterface: %s    Metered: %s\nProfile: %s\nTraffic policy: %s\nArgo throughput: %s\n",
-			networkState,
-			statusValue(model.status.Network.Interface),
-			statusValue(model.status.Network.Metered),
-			statusValue(model.status.ActiveProfile),
-			statusValue(model.status.Traffic.Policy),
-			formatTUISpeed(model.totalSpeed()),
-		)
-	} else {
-		_, _ = fmt.Fprintf(
-			view,
-			"Network: %s  Interface: %s  Metered: %s\nProfile: %s  Traffic policy: %s  Argo throughput: %s\n",
-			networkState,
-			statusValue(model.status.Network.Interface),
-			statusValue(model.status.Network.Metered),
-			statusValue(model.status.ActiveProfile),
-			statusValue(model.status.Traffic.Policy),
-			formatTUISpeed(model.totalSpeed()),
-		)
-	}
+	_, _ = fmt.Fprintf(
+		view,
+		"Network: %s  Interface: %s  Metered: %s\nProfile: %s  Traffic policy: %s  Argo throughput: %s\n",
+		diagnostic.Display(networkState),
+		statusValue(model.status.Network.Interface),
+		statusValue(model.status.Network.Metered),
+		statusValue(model.status.ActiveProfile),
+		statusValue(model.status.Traffic.Policy),
+		formatTUISpeed(model.totalSpeed()),
+	)
 	if model.status.Traffic.CurrentRateBitsPerSecond > 0 {
 		_, _ = fmt.Fprintf(view, "Adaptive limit: %d bit/s\n", model.status.Traffic.CurrentRateBitsPerSecond)
 	} else {
 		view.WriteString("Adaptive limit: unavailable\n")
 	}
 	if model.status.Traffic.Error != "" {
-		view.WriteString(console.Paint(model.color, console.Red, "QoS error: "+model.status.Traffic.Error))
+		view.WriteString(console.Paint(model.color, console.Red, "QoS error: "+diagnostic.Display(diagnostic.Text(model.status.Traffic.Error))))
+		view.WriteByte('\n')
+	}
+	if model.status.Network.Error != "" {
+		view.WriteString(console.Paint(model.color, console.Red, "Network error: "+diagnostic.Display(diagnostic.Text(model.status.Network.Error))))
 		view.WriteByte('\n')
 	}
 	if model.status.Traffic.LatencyAvailable {
@@ -430,7 +562,7 @@ func (model Model) renderNetworkAndQoS(view *strings.Builder) {
 			_, _ = fmt.Fprintf(view, " (baseline %s)", model.status.Traffic.BaselineLatency)
 		}
 		if model.status.Traffic.ControllerState != "" {
-			_, _ = fmt.Fprintf(view, "  Controller: %s", model.status.Traffic.ControllerState)
+			_, _ = fmt.Fprintf(view, "  Controller: %s", diagnostic.Display(model.status.Traffic.ControllerState))
 		}
 		view.WriteByte('\n')
 	} else {
@@ -452,7 +584,7 @@ func statusValue(value string) string {
 		return "unknown"
 	}
 
-	return value
+	return diagnostic.Display(value)
 }
 
 func (model Model) updateTextInput(message tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -513,12 +645,14 @@ func (model Model) updateConfirmation(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch message.String() {
 	case "y", "Y":
 		mode := model.mode
+		identifier := model.confirmID
 		model.mode = inputModeNone
+		model.confirmID = ""
 		switch mode {
 		case inputModeCancel:
-			return model.dispatchSelected("cancel")
+			return model.dispatchDownload("cancel", identifier)
 		case inputModeRemove:
-			return model.dispatchSelected("remove")
+			return model.dispatchDownload("remove", identifier)
 		case inputModeClear:
 			return model.dispatchClear()
 		case inputModeNone, inputModeAdd, inputModeProfile, inputModePolicy:
@@ -526,6 +660,7 @@ func (model Model) updateConfirmation(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "n", "N", "esc":
 		model.mode = inputModeNone
+		model.confirmID = ""
 	}
 
 	return model, nil
@@ -538,6 +673,18 @@ func (model Model) dispatchSelected(action string) (tea.Model, tea.Cmd) {
 	}
 	model.clearActionStatus()
 	identifier := model.downloads[model.selected].ID
+
+	return model.dispatchDownload(action, identifier)
+}
+
+func (model Model) dispatchDownload(action, identifier string) (tea.Model, tea.Cmd) {
+	if identifier == "" {
+		model.actionErr = fmt.Errorf("download confirmation is no longer valid")
+		return model, func() tea.Msg {
+			return actionResultMessage{err: model.actionErr}
+		}
+	}
+	model.clearActionStatus()
 	return model, func() tea.Msg {
 		var err error
 		switch action {
@@ -604,13 +751,20 @@ func (model Model) loadSnapshot() tea.Msg {
 }
 
 func (model *Model) applySnapshot(message snapshotMessage) {
+	selectedID := ""
+	if model.hasSelection() {
+		selectedID = model.downloads[model.selected].ID
+	}
 	model.status = message.status
 	model.downloads = append([]ipc.Download(nil), message.downloads...)
 	model.err = nil
 	model.ready = true
-	if model.selected >= len(model.downloads) && model.selected > 0 {
+	if index := model.downloadIndex(selectedID); index >= 0 {
+		model.selected = index
+	} else if model.selected >= len(model.downloads) && model.selected > 0 {
 		model.selected = len(model.downloads) - 1
 	}
+	model.validateConfirmation()
 	model.ensureVisible()
 	current := make(map[string]transferPoint, len(model.downloads))
 	currentSpeeds := make(map[string]int64, len(model.downloads))
@@ -643,9 +797,12 @@ func (model *Model) applySnapshot(message snapshotMessage) {
 				point.samples++
 				if point.samples >= tuiMinimumETASamples && (!point.etaVisible || message.at.Sub(point.etaAt) >= tuiETAInterval) {
 					seconds := float64(download.TotalSize-download.DownloadedBytes) / point.smoothed
-					point.eta = time.Duration(seconds * float64(time.Second))
-					point.etaAt = message.at
-					point.etaVisible = true
+					eta, valid := telemetry.DurationForSeconds(seconds)
+					point.etaVisible = valid
+					if valid {
+						point.eta = eta
+						point.etaAt = message.at
+					}
 				}
 			} else {
 				point.smoothed = 0
@@ -668,9 +825,48 @@ func (model *Model) applySnapshot(message snapshotMessage) {
 	model.previous = current
 }
 
-func refreshAfter(delay time.Duration) tea.Cmd {
-	return tea.Tick(delay, func(time.Time) tea.Msg {
-		return refreshMessage{}
+func (model Model) downloadIndex(identifier string) int {
+	for index, download := range model.downloads {
+		if download.ID == identifier {
+			return index
+		}
+	}
+
+	return -1
+}
+
+func (model *Model) validateConfirmation() {
+	if model.mode != inputModeCancel && model.mode != inputModeRemove {
+		return
+	}
+	index := model.downloadIndex(model.confirmID)
+	valid := index >= 0
+	if valid && model.mode == inputModeCancel {
+		valid = model.downloads[index].Status != "completed" && model.downloads[index].Status != "canceled"
+	}
+	if valid && model.mode == inputModeRemove {
+		status := model.downloads[index].Status
+		valid = status == "completed" || status == "failed" || status == "canceled"
+	}
+	if valid {
+		return
+	}
+	identifier := model.confirmID
+	model.confirmID = ""
+	model.notice = ""
+	model.actionErr = fmt.Errorf("confirmation canceled: download %s is no longer eligible", diagnostic.Display(identifier))
+}
+
+func (model *Model) scheduleRefresh(delay time.Duration) tea.Cmd {
+	if model.pending {
+		return nil
+	}
+	model.refresh++
+	model.pending = true
+	generation := model.refresh
+
+	return model.tick(delay, func(time.Time) tea.Msg {
+		return refreshMessage{generation: generation}
 	})
 }
 
@@ -679,7 +875,7 @@ func (model Model) viewWidth() int {
 		return 100
 	}
 
-	return max(32, model.width)
+	return max(1, model.width)
 }
 
 func (model Model) listCapacity() int {
@@ -687,9 +883,12 @@ func (model Model) listCapacity() int {
 	if height <= 0 {
 		height = 30
 	}
-	capacity := max(1, height-17)
-	if model.viewWidth() < 72 {
-		capacity = max(1, capacity/3)
+	if height < 18 {
+		return max(1, height-5)
+	}
+	capacity := max(1, height-18)
+	if model.viewWidth() < 96 {
+		capacity = max(1, (height-20)/3)
 	}
 
 	return min(8, capacity)
@@ -737,22 +936,22 @@ func statusColor(status string) console.Code {
 }
 
 func shortID(value string) string {
-	return truncateRunes(value, 8)
+	value = diagnostic.Display(value)
+	return truncateCells(value, 8)
 }
 
-func truncateRunes(value string, maximum int) string {
+func truncateCells(value string, maximum int) string {
 	if maximum <= 0 {
 		return ""
 	}
-	if utf8.RuneCountInString(value) <= maximum {
-		return value
-	}
-	runes := []rune(value)
-	if maximum <= 3 {
-		return string(runes[:maximum])
-	}
 
-	return string(runes[:maximum-1]) + "…"
+	return ansi.Truncate(value, maximum, "…")
+}
+
+func padCells(value string, width int) string {
+	value = truncateCells(value, width)
+
+	return value + strings.Repeat(" ", max(0, width-ansi.StringWidth(value)))
 }
 
 func formatTUIProgress(download ipc.Download) string {

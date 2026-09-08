@@ -3,11 +3,14 @@ package unit_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/kristyancarvalho/argo/internal/ipc"
 	"github.com/kristyancarvalho/argo/internal/tui"
 )
@@ -126,6 +129,26 @@ func TestTUIModelExitKeysQuit(t *testing.T) {
 	}
 }
 
+func TestTUICtrlCQuitsFromEveryModalMode(t *testing.T) {
+	for _, key := range []rune{'a', 'f', 'c', 'x', 'C', 't', '?'} {
+		t.Run(string(key), func(t *testing.T) {
+			client := &tuiStatusClient{
+				status:    ipc.Status{State: "running"},
+				downloads: [][]ipc.Download{{{ID: "one", Status: "completed"}}},
+			}
+			model := loadTUIModel(t, client)
+			updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{key}})
+			_, command := updated.(tui.Model).Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+			if command == nil {
+				t.Fatalf("Ctrl+C in mode %q did not request exit", string(key))
+			}
+			if _, valid := command().(tea.QuitMsg); !valid {
+				t.Fatalf("Ctrl+C in mode %q returned a non-quit message", string(key))
+			}
+		})
+	}
+}
+
 func TestTUIModelShowsIPCUnavailableState(t *testing.T) {
 	model, err := tui.NewModel(context.Background(), &tuiStatusClient{err: errors.New("connection refused")})
 	if err != nil {
@@ -135,6 +158,61 @@ func TestTUIModelShowsIPCUnavailableState(t *testing.T) {
 	view := updated.(tui.Model).View()
 	if !strings.Contains(view, "Daemon unavailable: connection refused") {
 		t.Fatalf("unexpected unavailable view %q", view)
+	}
+}
+
+func TestTUIActionsKeepSinglePeriodicRefresh(t *testing.T) {
+	client := &tuiStatusClient{
+		status:    ipc.Status{State: "running"},
+		downloads: [][]ipc.Download{{{ID: "one", Status: "paused"}}},
+	}
+	scheduled := 0
+	model, err := tui.NewModelWithOptions(context.Background(), client, tui.Options{
+		Tick: func(_ time.Duration, callback func(time.Time) tea.Msg) tea.Cmd {
+			scheduled++
+			return func() tea.Msg { return callback(time.Unix(int64(scheduled), 0)) }
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, periodic := model.Update(model.Init()())
+	model = updated.(tui.Model)
+	if periodic == nil || scheduled != 1 {
+		t.Fatalf("initial snapshot scheduled %d periodic refreshes", scheduled)
+	}
+	for range 200 {
+		updated, action := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		if action == nil {
+			t.Fatal("pause action was not dispatched")
+		}
+		updated, reload := updated.(tui.Model).Update(action())
+		if reload == nil {
+			t.Fatal("action result did not request a current snapshot")
+		}
+		updated, duplicate := updated.(tui.Model).Update(reload())
+		if duplicate != nil {
+			t.Fatal("action snapshot created another periodic refresh")
+		}
+		model = updated.(tui.Model)
+	}
+	if scheduled != 1 {
+		t.Fatalf("200 actions left %d periodic refreshes", scheduled)
+	}
+	if client.listCall != 201 {
+		t.Fatalf("200 actions made %d list requests, expected 201 including initial load", client.listCall)
+	}
+	updated, reload := model.Update(periodic())
+	if reload == nil {
+		t.Fatal("periodic refresh did not load a snapshot")
+	}
+	updated, next := updated.(tui.Model).Update(reload())
+	if next == nil || scheduled != 2 {
+		t.Fatalf("completed periodic cycle scheduled %d refreshes", scheduled)
+	}
+	_, stale := updated.(tui.Model).Update(periodic())
+	if stale != nil {
+		t.Fatal("stale periodic message started another refresh cycle")
 	}
 }
 
@@ -220,6 +298,27 @@ func TestTUIDownloadListCalculatesSpeedAndETA(t *testing.T) {
 	}
 }
 
+func TestTUILargeETAIsUnknownInsteadOfNegative(t *testing.T) {
+	client := &tuiStatusClient{
+		status: ipc.Status{State: "running"},
+		downloads: [][]ipc.Download{
+			{{ID: "large", Filename: "large", TotalSize: math.MaxInt64, Status: "downloading"}},
+			{{ID: "large", Filename: "large", DownloadedBytes: 1, TotalSize: math.MaxInt64, Status: "downloading"}},
+			{{ID: "large", Filename: "large", DownloadedBytes: 2, TotalSize: math.MaxInt64, Status: "downloading"}},
+		},
+	}
+	model := loadTUIModel(t, client)
+	for range 2 {
+		time.Sleep(5 * time.Millisecond)
+		updated, _ := model.Update(model.Init()())
+		model = updated.(tui.Model)
+	}
+	view := model.View()
+	if strings.Contains(view, "-2562047") || !strings.Contains(view, "-- downloading") {
+		t.Fatalf("large ETA was not rendered as unknown: %q", view)
+	}
+}
+
 func TestTUINetworkAndQoSConnected(t *testing.T) {
 	model := loadTUIModel(t, &tuiStatusClient{status: ipc.Status{
 		State: "running", Network: ipc.NetworkStatus{
@@ -268,6 +367,39 @@ func TestTUIShowsQoSError(t *testing.T) {
 	}})
 	if !strings.Contains(model.View(), "QoS error: helper unavailable") {
 		t.Fatalf("QoS error is missing from TUI: %q", model.View())
+	}
+}
+
+func TestTUIRedactsSourceAndDiagnosticSecrets(t *testing.T) {
+	secretURL := "https://user:password@example.test/file?token=secret"
+	model := loadTUIModel(t, &tuiStatusClient{
+		status: ipc.Status{State: "running", Network: ipc.NetworkStatus{
+			Error: "GET " + secretURL + ": failed",
+		}},
+		downloads: [][]ipc.Download{{{ID: "one", URL: secretURL, Filename: "file", Status: "failed"}}},
+	})
+	view := model.View()
+	if strings.Contains(view, "password") || strings.Contains(view, "token=secret") ||
+		!strings.Contains(view, "https://redacted@example.test/file?redacted") {
+		t.Fatalf("TUI exposed source credentials: %q", view)
+	}
+}
+
+func TestTUIEscapesUntrustedTerminalControls(t *testing.T) {
+	model := loadTUIModel(t, &tuiStatusClient{
+		status:    ipc.Status{State: "run\x1b\nFAKE\u202e"},
+		downloads: [][]ipc.Download{{{ID: "one", Filename: "file\x1b]0;title\a\nFAKE\r\t\u202e.iso", Status: "failed"}}},
+	})
+	view := model.View()
+	for _, character := range []rune{'\x1b', '\a', '\r', '\t', '\u202e'} {
+		if strings.ContainsRune(view, character) {
+			t.Fatalf("TUI contains control U+%04X: %q", character, view)
+		}
+	}
+	for _, line := range strings.Split(view, "\n") {
+		if line == "FAKE" {
+			t.Fatalf("TUI filename fabricated a row: %q", view)
+		}
 	}
 }
 
@@ -335,6 +467,83 @@ func TestTUILifecycleActionsRequireConfirmation(t *testing.T) {
 	}
 }
 
+func TestTUIConfirmationNeverTargetsReplacementRow(t *testing.T) {
+	for _, key := range []rune{'c', 'x'} {
+		t.Run(string(key), func(t *testing.T) {
+			status := "downloading"
+			if key == 'x' {
+				status = "completed"
+			}
+			client := &tuiStatusClient{
+				status: ipc.Status{State: "running"},
+				downloads: [][]ipc.Download{
+					{{ID: "original", Status: status}, {ID: "replacement", Status: status}},
+					{{ID: "replacement", Status: status}},
+				},
+			}
+			model := loadTUIModel(t, client)
+			updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{key}})
+			model = updated.(tui.Model)
+			updated, _ = model.Update(model.Init()())
+			model = updated.(tui.Model)
+			if !strings.Contains(model.View(), "confirmation canceled") {
+				t.Fatalf("removed confirmation target remained active: %q", model.View())
+			}
+			_, command := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+			if command == nil {
+				t.Fatal("invalid confirmation did not return an actionable result")
+			}
+			_ = command()
+			if len(client.actions) != 0 {
+				t.Fatalf("replacement row received actions: %v", client.actions)
+			}
+		})
+	}
+}
+
+func TestTUIConfirmationAndSelectionFollowIdentityAcrossReorder(t *testing.T) {
+	client := &tuiStatusClient{
+		status: ipc.Status{State: "running"},
+		downloads: [][]ipc.Download{
+			{{ID: "original", Filename: "original.bin", Status: "downloading"}, {ID: "other", Filename: "other.bin", Status: "downloading"}},
+			{{ID: "other", Filename: "other.bin", Status: "downloading"}, {ID: "original", Filename: "original.bin", Status: "downloading"}},
+		},
+	}
+	model := loadTUIModel(t, client)
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	model = updated.(tui.Model)
+	updated, _ = model.Update(model.Init()())
+	model = updated.(tui.Model)
+	if !strings.Contains(model.View(), "Cancel original? y/N") || !strings.Contains(model.View(), "> original.bin") {
+		t.Fatalf("confirmation or selection did not follow identity: %q", model.View())
+	}
+	_, command := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	if command == nil {
+		t.Fatal("stable confirmation did not dispatch")
+	}
+	_ = command()
+	if strings.Join(client.actions, ",") != "cancel:original" {
+		t.Fatalf("confirmation targeted %v", client.actions)
+	}
+}
+
+func TestTUIConfirmationIsCanceledAfterIncompatibleCompletion(t *testing.T) {
+	client := &tuiStatusClient{
+		status: ipc.Status{State: "running"},
+		downloads: [][]ipc.Download{
+			{{ID: "original", Status: "downloading"}},
+			{{ID: "original", Status: "completed"}},
+		},
+	}
+	model := loadTUIModel(t, client)
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	updated, _ = updated.(tui.Model).Update(model.Init()())
+	model = updated.(tui.Model)
+	if !strings.Contains(model.View(), "confirmation canceled") || strings.Contains(model.View(), "Cancel original? y/N") {
+		t.Fatalf("completed target retained cancel confirmation: %q", model.View())
+	}
+}
+
 func TestTUIHelpViewAndResponsiveViewport(t *testing.T) {
 	downloads := make([]ipc.Download, 12)
 	for index := range downloads {
@@ -365,6 +574,79 @@ func TestTUIHelpViewAndResponsiveViewport(t *testing.T) {
 	for _, line := range strings.Split(view, "\n") {
 		if len([]rune(line)) > 48 {
 			t.Fatalf("narrow view line exceeds width: %d %q", len([]rune(line)), line)
+		}
+	}
+}
+
+func TestTUIViewStaysInsideTerminalCellAndLineBounds(t *testing.T) {
+	downloads := make([]ipc.Download, 20)
+	for index := range downloads {
+		downloads[index] = ipc.Download{
+			ID:        strings.Repeat(string(rune('a'+index)), 32),
+			Filename:  strings.Repeat("界e\u0301", 30),
+			Status:    "downloading",
+			Priority:  "normal",
+			TotalSize: 100,
+		}
+	}
+	client := &tuiStatusClient{
+		status: ipc.Status{
+			State:         "running",
+			ActiveProfile: strings.Repeat("wide-profile-", 20),
+			Network:       ipc.NetworkStatus{Available: true, Connected: true, State: "connected", Interface: strings.Repeat("interface", 20)},
+			Traffic:       ipc.TrafficStatus{Policy: "throughput", Error: strings.Repeat("helper error ", 20)},
+		},
+		downloads: [][]ipc.Download{downloads},
+	}
+	base := loadTUIModel(t, client)
+	for _, dimensions := range [][2]int{{20, 12}, {32, 12}, {71, 24}, {72, 24}, {80, 24}} {
+		width, height := dimensions[0], dimensions[1]
+		t.Run(fmt.Sprintf("%dx%d", width, height), func(t *testing.T) {
+			updated, _ := base.Update(tea.WindowSizeMsg{Width: width, Height: height})
+			model := updated.(tui.Model)
+			for range 15 {
+				updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+				model = updated.(tui.Model)
+			}
+			assertTUIViewBounds(t, model.View(), width, height)
+			if !strings.Contains(ansi.Strip(model.View()), ">") {
+				t.Fatalf("selected row is not visible: %q", model.View())
+			}
+			for _, key := range []rune{'?', 'a', 'f', 'x', 'C', 't'} {
+				modal, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{key}})
+				assertTUIViewBounds(t, modal.(tui.Model).View(), width, height)
+			}
+		})
+	}
+}
+
+func TestTUIViewBoundsLongDaemonAndActionErrors(t *testing.T) {
+	width, height := 20, 8
+	unavailable := loadTUIModel(t, &tuiStatusClient{err: errors.New(strings.Repeat("connection failure ", 30))})
+	updated, _ := unavailable.Update(tea.WindowSizeMsg{Width: width, Height: height})
+	assertTUIViewBounds(t, updated.(tui.Model).View(), width, height)
+
+	client := &tuiStatusClient{
+		status:    ipc.Status{State: "running"},
+		downloads: [][]ipc.Download{{{ID: "one", Filename: "file", Status: "downloading"}}},
+		actionErr: errors.New(strings.Repeat("action failure ", 30)),
+	}
+	model := loadTUIModel(t, client)
+	updated, _ = model.Update(tea.WindowSizeMsg{Width: width, Height: height})
+	updated, command := updated.(tui.Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	updated, _ = updated.(tui.Model).Update(command())
+	assertTUIViewBounds(t, updated.(tui.Model).View(), width, height)
+}
+
+func assertTUIViewBounds(t *testing.T, view string, width, height int) {
+	t.Helper()
+	lines := strings.Split(strings.TrimSuffix(view, "\n"), "\n")
+	if len(lines) > height {
+		t.Fatalf("view has %d lines for height %d: %q", len(lines), height, view)
+	}
+	for _, line := range lines {
+		if measured := ansi.StringWidth(line); measured > width {
+			t.Fatalf("view line occupies %d cells for width %d: %q", measured, width, line)
 		}
 	}
 }

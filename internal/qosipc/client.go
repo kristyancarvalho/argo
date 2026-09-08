@@ -11,18 +11,22 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/kristyancarvalho/argo/internal/qos"
+	"github.com/kristyancarvalho/argo/internal/unixsocket"
 )
 
 type Client struct {
-	SocketPath string
-	Timeout    time.Duration
+	SocketPath  string
+	Timeout     time.Duration
+	ExpectedUID uint32
 }
 
 func NewClient(socketPath string) *Client {
-	return &Client{SocketPath: socketPath, Timeout: connectionTimeout}
+	return &Client{SocketPath: socketPath, Timeout: connectionTimeout, ExpectedUID: uint32(os.Geteuid())}
 }
 
 func (client *Client) Apply(ctx context.Context, state qos.DesiredState) error {
@@ -45,6 +49,9 @@ func (client *Client) Status(ctx context.Context) (Status, error) {
 }
 
 func (client *Client) call(ctx context.Context, operation Operation, payload any, result any) error {
+	if err := unixsocket.Validate(filepath.Dir(client.SocketPath)); err != nil {
+		return fmt.Errorf("validate QoS helper socket directory: %w", err)
+	}
 	identifier, err := requestID()
 	if err != nil {
 		return err
@@ -67,6 +74,16 @@ func (client *Client) call(ctx context.Context, operation Operation, payload any
 	defer func() {
 		_ = connection.Close()
 	}()
+	if err := unixsocket.ValidateSocket(client.SocketPath); err != nil {
+		return fmt.Errorf("validate QoS helper socket: %w", err)
+	}
+	if err := unixsocket.ValidatePeer(connection, client.ExpectedUID); err != nil {
+		return fmt.Errorf("authenticate QoS helper: %w", err)
+	}
+	stopClose := context.AfterFunc(ctx, func() {
+		_ = connection.Close()
+	})
+	defer stopClose()
 	if deadline, ok := ctx.Deadline(); ok {
 		if err := connection.SetDeadline(deadline); err != nil {
 			return fmt.Errorf("set QoS helper deadline: %w", err)
@@ -98,6 +115,9 @@ func (client *Client) call(ctx context.Context, operation Operation, payload any
 	}
 	if response.Version != ProtocolVersion {
 		return fmt.Errorf("QoS helper uses unsupported protocol version %d", response.Version)
+	}
+	if response.ID == "" && response.Error != nil && response.Error.Code == "server_busy" {
+		return RemoteError{Code: response.Error.Code, Message: response.Error.Message}
 	}
 	if response.ID != identifier {
 		return fmt.Errorf("QoS helper response identifier %q does not match request %q", response.ID, identifier)

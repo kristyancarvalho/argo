@@ -14,7 +14,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/kristyancarvalho/argo/internal/diagnostic"
 	"github.com/kristyancarvalho/argo/internal/model"
+	"golang.org/x/sys/unix"
 )
 
 const copyBufferSize = 32 * 1024
@@ -40,15 +42,17 @@ type Engine struct {
 	observer   func(model.DownloadID, ChunkProgress)
 	parts      string
 	strict     sync.Map
+	checkpoint func(string) error
 }
 
 type Options struct {
-	HTTPClient       *http.Client
-	BytesPerSecond   int64
-	MaximumChunks    int
-	MinimumChunkSize int64
-	ChunkProgress    func(model.DownloadID, ChunkProgress)
-	PartsDirectory   string
+	HTTPClient             *http.Client
+	BytesPerSecond         int64
+	MaximumChunks          int
+	MinimumChunkSize       int64
+	ChunkProgress          func(model.DownloadID, ChunkProgress)
+	PartsDirectory         string
+	FinalizationCheckpoint func(string) error
 }
 
 func New(store Store) *Engine {
@@ -104,6 +108,7 @@ func NewWithOptions(store Store, options Options) (*Engine, error) {
 		chunkCount: options.MaximumChunks,
 		observer:   options.ChunkProgress,
 		parts:      filepath.Clean(parts),
+		checkpoint: options.FinalizationCheckpoint,
 	}
 	engine.rateLimit.Store(options.BytesPerSecond)
 
@@ -159,7 +164,7 @@ func (engine *Engine) Download(ctx context.Context, download model.Download) err
 	); err != nil {
 		return engine.fail(ctx, download.ID, err)
 	}
-	if metadata.RangeSupported && metadata.TotalSize > 0 {
+	if metadata.RangeSupported && metadata.TotalSize > 0 && metadata.supportsBoundRequests() {
 		chunks, err := engine.planner.Plan(metadata.TotalSize, engine.chunkCount)
 		if err != nil {
 			return engine.fail(ctx, download.ID, err)
@@ -186,6 +191,7 @@ func (engine *Engine) Download(ctx context.Context, download model.Download) err
 	if offset > 0 {
 		request.Header.Set("Range", fmt.Sprintf("bytes=%d-", offset))
 	}
+	bindRepresentation(request, metadata)
 	response, err := engine.httpClient.Do(request)
 	if err != nil {
 		return engine.fail(ctx, download.ID, fmt.Errorf("perform HTTP request: %w", err))
@@ -193,6 +199,9 @@ func (engine *Engine) Download(ctx context.Context, download model.Download) err
 	defer func() {
 		_ = response.Body.Close()
 	}()
+	if err := validateRepresentation(response, metadata); err != nil {
+		return engine.fail(ctx, download.ID, err)
+	}
 
 	responseOffset, totalSize, err := resolveResponse(response, offset)
 	if err != nil {
@@ -205,7 +214,7 @@ func (engine *Engine) Download(ctx context.Context, download model.Download) err
 		}
 	}
 
-	partial, err := openPartial(engine.partialPath(download.ID), offset)
+	partial, err := engine.openPartial(download.ID, offset)
 	if err != nil {
 		return engine.fail(ctx, download.ID, err)
 	}
@@ -267,32 +276,16 @@ func (engine *Engine) Download(ctx context.Context, download model.Download) err
 	if err := partial.Sync(); err != nil {
 		return engine.fail(ctx, download.ID, fmt.Errorf("sync partial file: %w", err))
 	}
-	if err := partial.Close(); err != nil {
-		partialOpen = false
-		return engine.fail(ctx, download.ID, fmt.Errorf("close partial file: %w", err))
-	}
-	partialOpen = false
-	finalPath, err = engine.finalize(download, finalPath)
+	finalPath, err = engine.finalize(download, finalPath, partial)
 	if err != nil {
-		return engine.fail(ctx, download.ID, err)
-	}
-	filename := filepath.Base(finalPath)
-	if filename != download.Filename {
-		if err := engine.store.UpdateDownloadFilename(ctx, download.ID, filename, engine.now()); err != nil {
-			return engine.fail(ctx, download.ID, err)
-		}
-	}
-	if err := engine.store.UpdateDownloadStatus(
-		ctx,
-		download.ID,
-		model.StatusCompleted,
-		engine.now(),
-		"",
-	); err != nil {
 		return err
 	}
-
-	return nil
+	if err := partial.Close(); err != nil {
+		partialOpen = false
+		return engine.fail(ctx, download.ID, fmt.Errorf("close finalized partial file: %w", err))
+	}
+	partialOpen = false
+	return engine.completeCurrentFinalization(ctx, download, finalPath)
 }
 
 func (engine *Engine) preparePaths(download model.Download) (int64, string, error) {
@@ -304,22 +297,25 @@ func (engine *Engine) preparePaths(download model.Download) (int64, string, erro
 	if err := engine.preparePartial(download); err != nil {
 		return 0, "", err
 	}
-	partial := engine.partialPath(download.ID)
-	info, err := os.Stat(partial)
-	if errors.Is(err, os.ErrNotExist) {
+	partial, err := engine.openPartialFile(download.ID, unix.O_RDWR)
+	if errors.Is(err, unix.ENOENT) {
 		return 0, finalPath, nil
 	}
 	if err != nil {
 		return 0, "", fmt.Errorf("inspect partial file: %w", err)
 	}
-	if !info.Mode().IsRegular() {
-		return 0, "", fmt.Errorf("partial path is not a regular file: %s", partial)
+	defer func() {
+		_ = partial.Close()
+	}()
+	info, err := partial.Stat()
+	if err != nil {
+		return 0, "", fmt.Errorf("inspect partial file: %w", err)
 	}
 	if download.DownloadedBytes <= 0 || info.Size() < download.DownloadedBytes {
 		return 0, finalPath, nil
 	}
 	if info.Size() > download.DownloadedBytes {
-		if err := os.Truncate(partial, download.DownloadedBytes); err != nil {
+		if err := partial.Truncate(download.DownloadedBytes); err != nil {
 			return 0, "", fmt.Errorf("truncate partial file: %w", err)
 		}
 	}
@@ -327,12 +323,12 @@ func (engine *Engine) preparePaths(download model.Download) (int64, string, erro
 	return download.DownloadedBytes, finalPath, nil
 }
 
-func openPartial(path string, offset int64) (*os.File, error) {
-	flags := os.O_CREATE | os.O_WRONLY
+func (engine *Engine) openPartial(identifier model.DownloadID, offset int64) (*os.File, error) {
+	flags := unix.O_CREAT | unix.O_RDWR
 	if offset == 0 {
-		flags |= os.O_TRUNC
+		flags |= unix.O_TRUNC
 	}
-	file, err := os.OpenFile(path, flags, 0o600)
+	file, err := engine.openPartialFile(identifier, flags)
 	if err != nil {
 		return nil, fmt.Errorf("open partial file: %w", err)
 	}
@@ -439,6 +435,7 @@ func (engine *Engine) copy(
 }
 
 func (engine *Engine) fail(ctx context.Context, id model.DownloadID, downloadError error) error {
+	downloadError = diagnostic.Error(downloadError)
 	if ctx.Err() != nil {
 		return downloadError
 	}

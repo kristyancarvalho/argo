@@ -55,6 +55,8 @@ Select a configured profile at runtime with `argo profile <name>`. Select system
 
 Download priority only orders queued transfers managed by Argo. It does not shape packets or change an already active transfer. Traffic policies divide guaranteed link capacity between Argo and the default class: `focus` reserves 20% for Argo to protect system responsiveness, `balanced` reserves 50%, and `throughput` reserves 80%. Unused capacity can be borrowed by either class. `latency` adjusts Argo's limit from live latency measurements.
 
+System traffic policies classify sockets from the `argod` cgroup, preserve that identity through conntrack, and redirect received packets through an Argo-owned IFB. Argo shapes at 95% of the configured link rate so the controllable receive queue remains local; configure `qos.link_rate` to the measured downstream capacity. Existing ingress filters are preserved, and Argo refuses to occupy its reserved filter priority when another administrator already uses it.
+
 QoS is applied only while downloads are active and requires a nonzero `qos.link_rate`, a connected interface, and the privileged `argo-qosd` service. `argo status` reports whether shaping is active and shows the latest application error. Other applications, including download managers such as FDM, remain in the default class unless they run in the exact same cgroup as `argod`; using the packaged systemd services gives `argod` its own cgroup.
 
 To verify a live setup, check `systemctl --user status argod.service`, `systemctl status argo-qosd@$(id -un).service`, and `argo status`. Kernel state is visible with `sudo tc -s class show dev <interface>` and `sudo nft list table inet argo` while an Argo download is active.

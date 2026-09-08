@@ -11,16 +11,21 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"path/filepath"
 	"time"
+
+	"github.com/kristyancarvalho/argo/internal/unixsocket"
 )
 
 type Client struct {
-	SocketPath string
-	Timeout    time.Duration
+	SocketPath  string
+	Timeout     time.Duration
+	ExpectedUID uint32
 }
 
 func NewClient(socketPath string) *Client {
-	return &Client{SocketPath: socketPath, Timeout: connectionTimeout}
+	return &Client{SocketPath: socketPath, Timeout: connectionTimeout, ExpectedUID: uint32(os.Geteuid())}
 }
 
 func (client *Client) Status(ctx context.Context) (Status, error) {
@@ -91,12 +96,27 @@ func (client *Client) Priority(ctx context.Context, id, priority string) (Priori
 }
 
 func (client *Client) List(ctx context.Context) ([]Download, error) {
-	var response ListResponse
-	if err := client.Call(ctx, OperationList, nil, &response); err != nil {
-		return nil, err
+	downloads := make([]Download, 0)
+	cursor := ""
+	seen := make(map[string]struct{})
+	for {
+		var response ListResponse
+		if err := client.Call(ctx, OperationList, ListRequest{Cursor: cursor}, &response); err != nil {
+			return nil, err
+		}
+		downloads = append(downloads, response.Downloads...)
+		if response.NextCursor == "" {
+			return downloads, nil
+		}
+		if response.NextCursor == cursor {
+			return nil, fmt.Errorf("daemon returned a repeated download cursor")
+		}
+		if _, exists := seen[response.NextCursor]; exists {
+			return nil, fmt.Errorf("daemon returned a cyclic download cursor")
+		}
+		seen[response.NextCursor] = struct{}{}
+		cursor = response.NextCursor
 	}
-
-	return response.Downloads, nil
 }
 
 func (client *Client) Show(ctx context.Context, id string) (Download, error) {
@@ -140,6 +160,9 @@ func (client *Client) downloadAction(
 }
 
 func (client *Client) Call(ctx context.Context, operation Operation, payload any, result any) error {
+	if err := unixsocket.Validate(filepath.Dir(client.SocketPath)); err != nil {
+		return fmt.Errorf("validate daemon socket directory: %w", err)
+	}
 	requestID, err := newRequestID()
 	if err != nil {
 		return err
@@ -163,6 +186,16 @@ func (client *Client) Call(ctx context.Context, operation Operation, payload any
 	defer func() {
 		_ = connection.Close()
 	}()
+	if err := unixsocket.ValidateSocket(client.SocketPath); err != nil {
+		return fmt.Errorf("validate daemon socket: %w", err)
+	}
+	if err := unixsocket.ValidatePeer(connection, client.ExpectedUID); err != nil {
+		return fmt.Errorf("authenticate daemon: %w", err)
+	}
+	stopClose := context.AfterFunc(ctx, func() {
+		_ = connection.Close()
+	})
+	defer stopClose()
 	if deadline, ok := ctx.Deadline(); ok {
 		if err := connection.SetDeadline(deadline); err != nil {
 			return fmt.Errorf("set IPC deadline: %w", err)
@@ -196,6 +229,9 @@ func (client *Client) Call(ctx context.Context, operation Operation, payload any
 	}
 	if response.Version != ProtocolVersion {
 		return fmt.Errorf("daemon uses unsupported protocol version %d", response.Version)
+	}
+	if response.ID == "" && response.Error != nil && response.Error.Code == "server_busy" {
+		return RemoteError{Code: response.Error.Code, Message: response.Error.Message}
 	}
 	if response.ID != requestID {
 		return fmt.Errorf("IPC response identifier %q does not match request %q", response.ID, requestID)

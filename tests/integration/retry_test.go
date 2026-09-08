@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kristyancarvalho/argo/internal/downloader"
 	"github.com/kristyancarvalho/argo/internal/ipc"
 	"github.com/kristyancarvalho/argo/internal/model"
 )
@@ -184,6 +185,47 @@ func TestCanceledResumeRejectsMissingPartialData(t *testing.T) {
 	if persisted.Status != model.StatusCanceled {
 		t.Fatalf("invalid resume changed status to %s", persisted.Status)
 	}
+}
+
+func TestCanceledResumeMetadataRequestHonorsCancellation(t *testing.T) {
+	requestStarted := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		close(requestStarted)
+		<-request.Context().Done()
+	}))
+	defer server.Close()
+	parts := t.TempDir()
+	store := openTestStore(t)
+	identifier, err := model.NewDownloadID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	download := model.Download{
+		ID: identifier, URL: server.URL + "/resume.bin", Destination: t.TempDir(), Filename: "resume.bin",
+		TotalSize: 1024, DownloadedBytes: 1, Status: model.StatusCanceled, Priority: model.PriorityNormal,
+		CreatedAt: now, UpdatedAt: now, ETag: `"resume"`, RangeSupported: true,
+	}
+	if err := store.CreateDownload(context.Background(), download); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(parts, identifier.String()+".part"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	engine, err := downloader.NewWithOptions(store, downloader.Options{
+		HTTPClient: server.Client(), PartsDirectory: parts,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	err = engine.ValidateCanceledResume(ctx, download)
+	if err == nil || time.Since(started) > time.Second {
+		t.Fatalf("canceled resume returned %v after %s", err, time.Since(started))
+	}
+	awaitSignal(t, requestStarted)
 }
 
 func TestCanceledResumeRejectsChangedRemoteValidators(t *testing.T) {
