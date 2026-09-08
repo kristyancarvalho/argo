@@ -101,7 +101,7 @@ func validatorsMatch(download model.Download, metadata RemoteMetadata) bool {
 		if metadata.ETag != download.ETag {
 			return false
 		}
-		validated = true
+		validated = strongETag(download.ETag) != ""
 	}
 	if download.LastModified != "" {
 		if metadata.LastModified != download.LastModified {
