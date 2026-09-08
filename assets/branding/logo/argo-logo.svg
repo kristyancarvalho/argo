@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="600" viewBox="0 0 720 600" role="img" aria-labelledby="title description">
+  <title id="title">Argo full logo</title>
+  <desc id="description">Argo vessel mark, wordmark, and traffic-aware downloads tagline</desc>
+  <defs>
+    <linearGradient id="argo-logo-panel" x1="40" y1="24" x2="680" y2="576" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0B2A4A"/>
+      <stop offset="1" stop-color="#071A33"/>
+    </linearGradient>
+    <linearGradient id="argo-logo-mark" x1="246" y1="64" x2="474" y2="292" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1687E8"/>
+      <stop offset="1" stop-color="#0E5AA7"/>
+    </linearGradient>
+  </defs>
+  <rect x="12" y="12" width="696" height="576" rx="48" fill="url(#argo-logo-panel)"/>
+  <g transform="translate(232 50)">
+    <rect width="256" height="256" rx="60" fill="url(#argo-logo-mark)"/>
+    <path d="M26 50C62 31 91 34 119 53C148 74 181 76 230 43" fill="none" stroke="#65B8FF" stroke-width="6" stroke-linecap="round" opacity=".34"/>
+    <path d="M128 40V162" fill="none" stroke="#F7FBFF" stroke-width="10" stroke-linecap="round"/>
+    <path d="M114 57V147H63C78 110 94 81 114 57Z" fill="#F7FBFF"/>
+    <path d="M143 69V147H197C183 112 165 87 143 69Z" fill="#D8EEFF"/>
+    <path d="M54 159H207L187 190H83L54 159Z" fill="#F7FBFF"/>
+    <path d="M39 207C62 197 83 197 105 207C127 218 149 218 171 207C191 198 209 198 227 205" fill="none" stroke="#8BCBFF" stroke-width="8" stroke-linecap="round"/>
+  </g>
+  <text x="360" y="441" fill="#F7FBFF" font-family="DejaVu Sans, Liberation Sans, Arial, sans-serif" font-size="132" font-weight="700" letter-spacing="17" text-anchor="middle">ARGO</text>
+  <text x="360" y="505" fill="#65B8FF" font-family="DejaVu Sans, Liberation Sans, Arial, sans-serif" font-size="24" font-weight="600" letter-spacing="6" text-anchor="middle">NAVIGATE THE FLOW</text>
+</svg>

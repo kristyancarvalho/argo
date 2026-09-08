@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="480" viewBox="0 0 1440 480" role="img" aria-labelledby="title description">
+  <title id="title">Argo repository banner</title>
+  <desc id="description">Argo traffic-aware downloads for Linux with a vessel and flowing network routes</desc>
+  <defs>
+    <linearGradient id="argo-banner-background" x1="0" y1="0" x2="1440" y2="480" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#071A33"/>
+      <stop offset=".58" stop-color="#0B2A4A"/>
+      <stop offset="1" stop-color="#0E5AA7"/>
+    </linearGradient>
+    <linearGradient id="argo-banner-mark" x1="108" y1="88" x2="412" y2="392" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1687E8"/>
+      <stop offset="1" stop-color="#0B3D78"/>
+    </linearGradient>
+    <radialGradient id="argo-banner-glow" cx="0" cy="0" r="1" gradientTransform="translate(1180 104) rotate(135) scale(470 330)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1687E8" stop-opacity=".42"/>
+      <stop offset="1" stop-color="#1687E8" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1440" height="480" rx="36" fill="url(#argo-banner-background)"/>
+  <rect width="1440" height="480" rx="36" fill="url(#argo-banner-glow)"/>
+  <g opacity=".24" fill="none" stroke="#65B8FF" stroke-width="2">
+    <path d="M750 96C880 24 962 166 1084 92C1182 33 1283 54 1440 8"/>
+    <path d="M704 167C852 85 947 241 1092 153C1207 83 1321 105 1440 68"/>
+    <path d="M738 359C876 282 978 425 1111 344C1223 276 1330 301 1440 266"/>
+    <circle cx="750" cy="96" r="7" fill="#65B8FF" stroke="none"/>
+    <circle cx="1092" cy="153" r="7" fill="#65B8FF" stroke="none"/>
+    <circle cx="1111" cy="344" r="7" fill="#65B8FF" stroke="none"/>
+  </g>
+  <g transform="translate(92 72)">
+    <rect width="336" height="336" rx="78" fill="url(#argo-banner-mark)"/>
+    <path d="M35 66C82 41 120 45 156 70C194 97 237 99 301 56" fill="none" stroke="#65B8FF" stroke-width="8" stroke-linecap="round" opacity=".34"/>
+    <path d="M168 53V209" fill="none" stroke="#F7FBFF" stroke-width="13" stroke-linecap="round"/>
+    <path d="M149 75V190H81C101 143 123 106 149 75Z" fill="#F7FBFF"/>
+    <path d="M187 91V190H258C239 146 216 114 187 91Z" fill="#D8EEFF"/>
+    <path d="M70 206H270L244 246H109L70 206Z" fill="#F7FBFF"/>
+    <path d="M51 268C81 255 108 255 137 268C166 282 195 282 224 268C250 256 274 256 298 266" fill="none" stroke="#8BCBFF" stroke-width="11" stroke-linecap="round"/>
+  </g>
+  <text x="510" y="238" fill="#F7FBFF" font-family="DejaVu Sans, Liberation Sans, Arial, sans-serif" font-size="150" font-weight="700" letter-spacing="18">ARGO</text>
+  <text x="518" y="302" fill="#8BCBFF" font-family="DejaVu Sans, Liberation Sans, Arial, sans-serif" font-size="32" font-weight="500" letter-spacing="1">Traffic-aware downloads for Linux</text>
+  <path d="M520 342H1008" stroke="#1687E8" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="520" cy="342" r="7" fill="#65B8FF"/>
+  <circle cx="1008" cy="342" r="7" fill="#65B8FF"/>
+</svg>
