@@ -1,21 +1,188 @@
+<p align="center">
+  <img src="assets/branding/banner/argo-banner.svg" alt="Argo — traffic-aware downloads for Linux" width="100%">
+</p>
+
 # Argo
 
-Argo is a Linux-first download manager and network traffic governor.
+Argo is a terminal-first download manager for Linux. A persistent user daemon handles HTTP and HTTPS transfers while the CLI and TUI provide control, visibility, scheduling, and optional Linux-native traffic policies.
 
-## Status
+<p>
+  <a href="#project-status"><img src="assets/branding/widgets/status-early-development.svg" alt="Status: early development" height="28"></a>
+  <a href="#project-status"><img src="assets/branding/widgets/stage-pre-1-0.svg" alt="Stage: pre-1.0" height="28"></a>
+  <img src="assets/branding/widgets/language-go.svg" alt="Language: Go" height="28">
+  <img src="assets/branding/widgets/platform-linux.svg" alt="Platform: Linux" height="28">
+  <a href="LICENSE"><img src="assets/branding/widgets/license-gpl3.svg" alt="License: GPL-3.0-or-later" height="28"></a>
+  <a href="https://github.com/kristyancarvalho/argo/actions/workflows/ci.yml"><img src="https://github.com/kristyancarvalho/argo/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI status"></a>
+</p>
 
-Early development.
+## Table of contents
 
-## Goals
+- [Overview](#overview)
+- [Why Argo exists](#why-argo-exists)
+- [Features](#features)
+- [Architecture](#architecture)
+- [Requirements](#requirements)
+- [Build and installation](#build-and-installation)
+- [Quick start](#quick-start)
+- [CLI overview](#cli-overview)
+- [Configuration](#configuration)
+- [Traffic policies and priorities](#traffic-policies-and-priorities)
+- [Project status](#project-status)
+- [Development workflow](#development-workflow)
+- [Testing](#testing)
+- [Repository structure](#repository-structure)
+- [Brand assets](#brand-assets)
+- [License](#license)
 
-- Provide reliable daemon-backed HTTP and HTTPS downloads.
-- Schedule transfers intentionally with bounded resource usage.
-- Protect system responsiveness through optional Linux-native traffic control.
-- Remain lightweight, scriptable, and terminal-first.
+## Overview
+
+Argo separates download work from its interfaces. `argod` owns transfers, state, scheduling, and recovery; `argo` sends commands over a protected Unix socket; and `argo-qosd` is an optional, narrowly privileged helper for kernel traffic control. Closing the CLI or TUI does not stop the daemon's active downloads.
+
+Completed files go to `$HOME/Downloads` by default. Internal partial data and the SQLite database live in separate XDG locations, so starting Argo from another working directory does not leave `.part` files there.
+
+## Why Argo exists
+
+Large downloads should not require an interactive client to remain open, overwrite existing files, or make the rest of a Linux system unusable. Argo combines durable download management with explicit queue priorities and optional receive-path shaping. These are separate controls: priorities order Argo's own queued work, while traffic policies govern how active Argo traffic competes with other applications.
+
+## Features
+
+### Implemented
+
+- Persistent daemon-backed HTTP and HTTPS downloads
+- Redirects, validators, byte ranges, bounded chunking, pause, resume, and crash recovery
+- Historical record management with remove, clear, retry, and repeated-URL support
+- Collision-safe final filenames without silently overwriting completed files
+- High, normal, and low scheduling priority with configurable concurrency
+- XDG-aware configuration, database, runtime socket, and partial-file storage
+- Configurable profiles, rate limits, metered-network behavior, and NetworkManager observation
+- CLI status, non-scrolling live watch mode, human-readable output, and terminal-aware color
+- Responsive TUI with download details, actions, confirmations, help, and narrow-terminal handling
+- Optional cgroup-based traffic classification and Linux RX shaping through nftables, conntrack, `tc`, and IFB
+- Adaptive latency policy using smoothed telemetry and bounded rate changes
+- Unprivileged main daemon with a separate `CAP_NET_ADMIN` QoS helper
+
+### Current boundaries
+
+- Argo is Linux-first and relies on Linux facilities for system traffic policy support.
+- The project is pre-1.0; configuration and internal persistence formats may still evolve through migrations.
+- Source builds and systemd unit files are provided, but distribution packages are not currently published.
+- Kernel QoS requires explicit link-rate configuration, the helper service, and a supported host network setup. Downloads continue without QoS when the helper is unavailable.
+
+## Architecture
+
+```text
+                       protected Unix IPC
+  argo CLI / TUI  ------------------------------>  argod
+                                                       |
+                    +----------------------------------+------------------+
+                    |                  |               |                  |
+                 downloader        scheduler       SQLite          NetworkManager
+                    |                                  |                  |
+              XDG state parts                    persistent state    link awareness
+                    |
+              completed files
+
+  argod  -- authenticated Unix IPC -->  argo-qosd  -->  nftables + tc + IFB
+                                             optional privileged boundary
+```
+
+`argod` runs as the user and remains the sole owner of download lifecycle state. The optional helper accepts a constrained protocol and owns only Argo's networking objects. The ordinary CLI never performs downloads itself.
+
+## Requirements
+
+- Linux
+- Go 1.27 or newer for source builds
+- `make` for the documented build targets
+- NetworkManager for connection and metered-link awareness
+- systemd, nftables, and iproute2/`tc` for optional system traffic policies
+- `rsvg-convert` only when regenerating branding PNGs
+
+Basic downloading does not require root privileges or the QoS helper.
+
+## Build and installation
+
+Clone the repository and build all three executables:
+
+```sh
+git clone https://github.com/kristyancarvalho/argo.git
+cd argo
+make build
+```
+
+The binaries are written to `bin/`:
+
+- `bin/argo` — command-line client and TUI launcher
+- `bin/argod` — per-user download daemon
+- `bin/argo-qosd` — optional privileged traffic-control helper
+
+For a system-wide source installation:
+
+```sh
+sudo install -Dm755 bin/argo /usr/bin/argo
+sudo install -Dm755 bin/argod /usr/bin/argod
+sudo install -Dm755 bin/argo-qosd /usr/bin/argo-qosd
+install -Dm644 packaging/systemd/argod.service "$HOME/.config/systemd/user/argod.service"
+sudo install -Dm644 packaging/systemd/argo-qosd@.service /etc/systemd/system/argo-qosd@.service
+systemctl --user daemon-reload
+sudo systemctl daemon-reload
+```
+
+Enable the user daemon with `systemctl --user enable --now argod.service`. Enable QoS only when needed, using the same account that runs `argod`:
+
+```sh
+sudo systemctl enable --now "argo-qosd@$(id -un).service"
+```
+
+## Quick start
+
+For local testing, start the daemon in one terminal:
+
+```sh
+make run
+```
+
+Then use the client from another terminal:
+
+```sh
+./bin/argo add https://example.com/archive.iso
+./bin/argo list
+./bin/argo watch
+```
+
+Open the terminal interface with:
+
+```sh
+./bin/argo tui
+```
+
+Downloads continue after the client exits. Unless configured otherwise, the completed file is placed in `$HOME/Downloads` and resumable state is kept under the XDG state directory.
+
+## CLI overview
+
+| Command | Purpose |
+| --- | --- |
+| `argo add <url>` | Add a new HTTP or HTTPS transfer |
+| `argo list` | List downloads and history |
+| `argo show <id>` | Show complete transfer details |
+| `argo pause <id>` | Pause queued or active work |
+| `argo resume <id>` | Continue valid partial state with the same ID |
+| `argo cancel <id>` | Cancel a transfer while preserving resumable data when valid |
+| `argo remove <id>` | Remove one completed, failed, or canceled record and its Argo-owned partial data |
+| `argo clear` | Remove completed, failed, and canceled history without stopping active or resumable work |
+| `argo retry <id>` | Create a new transfer ID from completed, failed, or canceled history |
+| `argo priority <id> <level>` | Set queued priority to `low`, `normal`, or `high` |
+| `argo watch` | Redraw live progress in a TTY, or print one snapshot when piped |
+| `argo status` | Show daemon, network, profile, and QoS state |
+| `argo policy <name>` | Select `off`, `focus`, `balanced`, `throughput`, or `latency` |
+| `argo profile <name>` | Activate a configured profile |
+| `argo tui` | Open the interactive terminal interface |
+| `argo help` | Show built-in command help |
+
+`argo --help` and `argo -h` are also supported. Set `NO_COLOR=1` to disable color in terminal output.
 
 ## Configuration
 
-`argod` reads `$XDG_CONFIG_HOME/argo/config.toml`, falling back to `~/.config/argo/config.toml`.
+`argod` reads `$XDG_CONFIG_HOME/argo/config.toml`, falling back to `~/.config/argo/config.toml`. Configuration is loaded at daemon startup, so restart `argod` after editing it.
 
 ```toml
 [download]
@@ -33,9 +200,12 @@ resume_after_metered = false
 policy = "off"
 link_rate = "0"
 latency_target = "20ms"
+min_rate = "10M"
+max_rate = "80M"
 probe_target = ""
 probe_timeout = "1s"
 sample_interval = "1s"
+manual_baseline = ""
 
 [profiles.gaming]
 download_limit = "30M"
@@ -49,39 +219,86 @@ min_rate = "10M"
 max_rate = "80M"
 ```
 
-Configuration is loaded at daemon startup. Restart `argod` after editing the file.
-Completed downloads default to `$HOME/Downloads`; `download.directory` accepts an absolute path or a path beginning with `~/`. Argo keeps resumable partial data separately under `$XDG_STATE_HOME/argo/parts`, falling back to `$HOME/.local/state/argo/parts`, and never derives either location from the CLI working directory.
-Select a configured profile at runtime with `argo profile <name>`. Select system traffic shaping with `argo policy <off|balanced|throughput|latency|focus>`. Download rates use bytes per second, while `qos.link_rate`, `min_rate`, and `max_rate` use bits per second. `K`, `M`, and `G` are decimal suffixes. Latency policy profiles can override the acceptable latency increase and rate bounds. Set `qos.probe_target` to a safe `host:port` endpoint to collect TCP-connect latency; an empty target produces missing telemetry and the bounded fallback behavior. The active profile is persisted across daemon restarts.
+Download limits use bytes per second. QoS link and adaptive rate values use bits per second. `K`, `M`, and `G` are decimal suffixes. `download.directory` must be absolute or begin with `~/`; Argo creates a missing valid directory rather than falling back to the command's working directory.
 
-Download priority only orders queued transfers managed by Argo. It does not shape packets or change an already active transfer. Traffic policies divide guaranteed link capacity between Argo and the default class: `focus` reserves 20% for Argo to protect system responsiveness, `balanced` reserves 50%, and `throughput` reserves 80%. Unused capacity can be borrowed by either class. `latency` adjusts Argo's limit from live latency measurements.
+### Runtime paths
 
-System traffic policies classify sockets from the `argod` cgroup, preserve that identity through conntrack, and redirect received packets through an Argo-owned IFB. Argo shapes at 95% of the configured link rate so the controllable receive queue remains local; configure `qos.link_rate` to the measured downstream capacity. Existing ingress filters are preserved, and Argo refuses to occupy its reserved filter priority when another administrator already uses it.
+| Data | XDG path | Fallback |
+| --- | --- | --- |
+| Configuration | `$XDG_CONFIG_HOME/argo/config.toml` | `$HOME/.config/argo/config.toml` |
+| Database | `$XDG_DATA_HOME/argo/argo.db` | `$HOME/.local/share/argo/argo.db` |
+| Partial files | `$XDG_STATE_HOME/argo/parts/<download-id>.part` | `$HOME/.local/state/argo/parts/<download-id>.part` |
+| Daemon socket | `$XDG_RUNTIME_DIR/argo/argod.sock` | a private per-user directory under the system temporary directory |
+| Completed files | configured `download.directory` | `$HOME/Downloads` |
 
-QoS is applied only while downloads are active and requires a nonzero `qos.link_rate`, a connected interface, and the privileged `argo-qosd` service. `argo status` reports whether shaping is active and shows the latest application error. Other applications, including download managers such as FDM, remain in the default class unless they run in the exact same cgroup as `argod`; using the packaged systemd services gives `argod` its own cgroup.
+## Traffic policies and priorities
 
-To verify a live setup, check `systemctl --user status argod.service`, `systemctl status argo-qosd@$(id -un).service`, and `argo status`. Kernel state is visible with `sudo tc -s class show dev <interface>` and `sudo nft list table inet argo` while an Argo download is active.
+Download priority affects admission order among queued Argo transfers. It does not preempt an active transfer or shape packets.
 
-Run `argo tui` for the optional terminal interface. It connects to the existing user daemon, and exiting the interface does not stop active downloads.
-The TUI keeps daemon and network state separate from the scrollable download list, adapts to narrow terminals, shows full selected details, and provides confirmed cancel, remove, and clear actions. Press `?` for its keyboard reference.
+Traffic policy affects active download traffic relative to the default system class:
 
-Run `argo --help` to list commands and explain the difference between download priority and system traffic policies. Argo uses colors when writing to a terminal; set `NO_COLOR=1` to disable them.
+| Policy | Behavior |
+| --- | --- |
+| `off` | Do not install active shaping state |
+| `focus` | Reserve 20% of guaranteed capacity for Argo, favoring system responsiveness |
+| `balanced` | Split guaranteed capacity equally |
+| `throughput` | Reserve 80% of guaranteed capacity for Argo |
+| `latency` | Adjust Argo's limit from measured latency within configured bounds |
 
-`argo resume <id>` continues valid partial state with the same transfer identity. `argo retry <id>` creates a new transfer from completed, failed, or canceled history, preserving the original record. Repeated URLs always create new IDs, and existing destination names receive a deterministic numeric suffix instead of being overwritten.
+Unused capacity can be borrowed by either class. Policies are applied only while downloads are active and require a nonzero `qos.link_rate`, a connected interface, and `argo-qosd`. Argo classifies `argod` through its cgroup, carries that identity through conntrack, and redirects received traffic to an Argo-owned IFB before shaping it.
 
-`argo watch` redraws one live region when attached to a terminal and exits after one plain snapshot when piped or redirected. Throughput remains responsive while ETA uses smoothed samples and a three-second display debounce.
+Use `argo status` for the current policy and any helper error. On a configured host, inspect live kernel state with `sudo tc -s class show dev <interface>` and `sudo nft list table inet argo` while a transfer is active.
 
-## systemd
+## Project status
 
-Install `packaging/systemd/argod.service` under the user unit directory and `packaging/systemd/argo-qosd@.service` under the system unit directory. Start the downloader for the current user with `systemctl --user enable --now argod.service`.
+Argo is functional early-stage software in the pre-1.0 v0.7.x development line. The daemon, transfer lifecycle, persistence, terminal interfaces, and optional RX QoS path are implemented and covered by unit, integration, end-to-end, race, and isolated kernel tests. The compatibility surface is not yet declared stable, and users should review release notes before upgrading.
 
-The QoS helper is a system service template. Start exactly one instance for the account running `argod`, for example `systemctl enable --now argo-qosd@alice.service`. The helper runs as that account with only `CAP_NET_ADMIN`; `argod` remains unprivileged. It owns the Argo nftables table and traffic-control tree used by active traffic policies.
+Published versions and their validated changes are listed on the [GitHub Releases page](https://github.com/kristyancarvalho/argo/releases). Active work is tracked through [issues](https://github.com/kristyancarvalho/argo/issues) and [milestones](https://github.com/kristyancarvalho/argo/milestones); availability is based on merged code, not roadmap intent.
 
-## Development
+The pre-1.0 direction is continued correctness and security hardening, validation across Linux networking environments, and preparation for easier distribution. A proposed capability becomes committed work only when it has an issue and release milestone; this README does not present untracked ideas as available features.
 
-Run the complete local CI-equivalent suite with `make check`. Individual targets include `format`, `format-check`, `vet`, `lint`, `test-unit`, `test-integration`, `test-e2e`, `test-race`, and `build`.
+## Development workflow
 
-Run `make run` to compile all executables into `bin/` and launch `argod` for local testing. Stop it with Ctrl+C. Pass daemon options with `RUN_ARGS`, for example `make run RUN_ARGS="-rate-limit 1000000"`.
+Development is issue-driven:
+
+1. Releases are represented by GitHub milestones.
+2. Each implementation issue uses an `issue/<number>-<slug>` branch created from `dev`.
+3. Issue branches are validated and merged into `dev`.
+4. A completed milestone is promoted from `dev` to `main`, then tagged and released.
+
+Commit messages follow `type(scope): summary`. Production Go source contains no comments, and every implementation includes tests under the dedicated `tests/` hierarchy.
+
+## Testing
+
+Run the local CI-equivalent suite:
+
+```sh
+make check
+```
+
+Useful focused targets are `make format-check`, `make vet`, `make lint`, `make test-unit`, `make test-integration`, `make test-e2e`, `make test-race`, and `make build`. CI executes formatting, vet, golangci-lint, all three test layers, the race detector, and builds for every executable.
+
+The isolated kernel QoS tests are capability-gated and skip when the required namespace and traffic-control facilities are unavailable. They never require changing the developer's ordinary host network configuration.
+
+## Repository structure
+
+```text
+argo/
+├── assets/branding/   Logo sources, exports, banners, widgets, and brand guide
+├── cmd/               argo, argod, and argo-qosd entry points
+├── internal/          Application packages and private implementation
+├── packaging/systemd/ User daemon and privileged helper units
+├── tests/unit/        Focused component and contract tests
+├── tests/integration/ Cross-component behavior tests
+├── tests/e2e/         Binary, lifecycle, and isolated system tests
+├── Makefile           Build and validation entry points
+└── LICENSE            GPL-3.0-or-later license text
+```
+
+## Brand assets
+
+The canonical blue identity, usage guidance, palette, SVG sources, and PNG exports live in [`assets/branding/`](assets/branding/BRAND.md). Run `./assets/branding/export.sh` to regenerate raster assets when `rsvg-convert` is installed.
 
 ## License
 
-GPL-3.0-or-later.
+Argo is free software licensed under the [GNU General Public License v3.0 or later](LICENSE).
