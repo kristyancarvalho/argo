@@ -1,4 +1,8 @@
-<section class="features" aria-labelledby="features-title">
+---
+import Icon from "../Icon.astro";
+---
+
+<section class="features" aria-labelledby="features-title" data-reveal>
   <header>
     <p>02 / Built for the route</p>
     <h2 id="features-title">Reliable transfer.<br /><em>Deliberate traffic.</em></h2>
@@ -6,7 +10,7 @@
   <div class="feature-grid">
     <article>
       <p class="number">01</p><div>
-        <h3>Persistent recovery</h3><p>
+        <h3><Icon name="database" />Persistent recovery</h3><p>
           Pause, resume, cancel, retry, and recover transfers across daemon restarts. Validators and
           partial state protect file integrity.
         </p>
@@ -14,7 +18,7 @@
     </article>
     <article>
       <p class="number">02</p><div>
-        <h3>Intentional scheduling</h3><p>
+        <h3><Icon name="route" />Intentional scheduling</h3><p>
           Bounded concurrency and stable high, normal, and low queue priorities keep parallel work
           predictable.
         </p>
@@ -22,7 +26,7 @@
     </article>
     <article>
       <p class="number">03</p><div>
-        <h3>Network awareness</h3><p>
+        <h3><Icon name="network" />Network awareness</h3><p>
           NetworkManager state, metered-link behavior, and profiles adapt download decisions to the
           active connection.
         </p>
@@ -30,7 +34,7 @@
     </article>
     <article class="governance">
       <p class="number">04</p><div>
-        <h3>Linux traffic governance</h3><p>
+        <h3><Icon name="shield" />Linux traffic governance</h3><p>
           An optional capability-limited helper coordinates cgroups, conntrack, nftables, IFB, and <code
             >tc</code
           > without making the downloader daemon root.
@@ -50,7 +54,7 @@
 
 <style>
   .features {
-    padding: clamp(4rem, 9vw, 8rem) clamp(1.25rem, 6vw, 6rem);
+    padding: clamp(4rem, 9vw, 8rem) var(--argo-section-gutter);
     border-block: 1px solid var(--argo-border);
     background: var(--argo-surface);
   }
@@ -105,9 +109,16 @@
     align-self: end;
   }
   h3 {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
     margin: 0 0 1rem;
     font-size: clamp(1.4rem, 2.3vw, 2.2rem);
     letter-spacing: -0.03em;
+  }
+  h3 :global(svg) {
+    flex: 0 0 auto;
+    color: var(--argo-blue-400);
   }
   article div > p {
     max-width: 35rem;

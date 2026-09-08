@@ -167,6 +167,51 @@ func TestWebsiteHomepageProvidesResponsiveAndAccessibleNavigation(t *testing.T) 
 	}
 }
 
+func TestWebsiteHomepageRefinementContracts(t *testing.T) {
+	root := repositoryRoot(t)
+	page, err := os.ReadFile(filepath.Join(root, "website", "src", "pages", "index.astro"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pageValue := string(page)
+	for _, forbidden := range []string{"page-frame", "Linux-native download control"} {
+		if strings.Contains(pageValue, forbidden) {
+			t.Errorf("homepage retains removed presentation %q", forbidden)
+		}
+	}
+	for _, expected := range []string{"data-reveal", "IntersectionObserver", "prefers-reduced-motion"} {
+		if !strings.Contains(pageValue, expected) {
+			t.Errorf("homepage refinement does not contain %q", expected)
+		}
+	}
+
+	hero, err := os.ReadFile(filepath.Join(root, "website", "src", "components", "home", "Hero.astro"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	heroValue := string(hero)
+	if strings.Contains(heroValue, "hero-cards") || strings.Contains(heroValue, "Linux-native download control") {
+		t.Fatal("hero retains the removed eyebrow or three-card strip")
+	}
+	for _, expected := range []string{`class="control-rail"`, "Control plane", `name="network"`, `name="terminal"`} {
+		if !strings.Contains(heroValue, expected) {
+			t.Errorf("hero control rail does not contain %q", expected)
+		}
+	}
+
+	architecture, err := os.ReadFile(filepath.Join(root, "website", "src", "components", "home", "Architecture.astro"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	architectureValue := string(architecture)
+	if !strings.Contains(architectureValue, ".connector {") || !strings.Contains(architectureValue, "grid-column: 1 / -1") {
+		t.Fatal("architecture IPC connector is not centered across the complete map grid")
+	}
+	if _, err := os.Stat(filepath.Join(root, "website", "src", "components", "Icon.astro")); err != nil {
+		t.Fatalf("local SVG icon system: %v", err)
+	}
+}
+
 func TestStarlightDocumentationPortalHasSubstantivePublicGuides(t *testing.T) {
 	root := repositoryRoot(t)
 	required := []string{

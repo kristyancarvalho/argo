@@ -19,42 +19,40 @@ const date = new Intl.DateTimeFormat("en-US", {
 
 <SiteLayout title="Changelog" description="Published Argo releases and their validated changes.">
   <a class="skip-link" href="#releases">Skip to releases</a>
-  <div class="changelog-frame">
-    <Header />
-    <main id="releases">
-      <header class="changelog-heading">
-        <p>Release log / verified history</p>
-        <h1>Every route<br />leaves a wake.</h1>
-        <p>Published Argo releases, drawn from the repository's real tags and release notes.</p>
-      </header>
-      <ol class="release-list">
-        {
-          releases.map((release, index) => (
-            <li>
-              <a href={`/changelog/${release.data.version}/`}>
-                <span class="sequence">{String(releases.length - index).padStart(2, "0")}</span>
-                <span class="release-title">
-                  <>
-                    <strong>{release.data.title}</strong>
-                    <small>{release.data.description}</small>
-                  </>
-                </span>
-                <span class="release-meta">
-                  <>
-                    <time datetime={release.data.date.toISOString()}>
-                      {date.format(release.data.date)}
-                    </time>
-                    <b>{release.data.version}</b>
-                  </>
-                </span>
-              </a>
-            </li>
-          ))
-        }
-      </ol>
-    </main>
-    <Footer />
-  </div>
+  <Header />
+  <main id="releases">
+    <header class="changelog-heading">
+      <p>Release log / verified history</p>
+      <h1>Every route<br />leaves a wake.</h1>
+      <p>Published Argo releases, drawn from the repository's real tags and release notes.</p>
+    </header>
+    <ol class="release-list">
+      {
+        releases.map((release, index) => (
+          <li>
+            <a href={`/changelog/${release.data.version}/`}>
+              <span class="sequence">{String(releases.length - index).padStart(2, "0")}</span>
+              <span class="release-title">
+                <>
+                  <strong>{release.data.title}</strong>
+                  <small>{release.data.description}</small>
+                </>
+              </span>
+              <span class="release-meta">
+                <>
+                  <time datetime={release.data.date.toISOString()}>
+                    {date.format(release.data.date)}
+                  </time>
+                  <b>{release.data.version}</b>
+                </>
+              </span>
+            </a>
+          </li>
+        ))
+      }
+    </ol>
+  </main>
+  <Footer />
 </SiteLayout>
 
 <style>
@@ -71,17 +69,8 @@ const date = new Intl.DateTimeFormat("en-US", {
   .skip-link:focus {
     transform: translateY(0);
   }
-  .changelog-frame {
-    width: min(calc(100% - 2rem), var(--argo-content));
-    margin: 1rem auto;
-    overflow: clip;
-    border: 1px solid var(--argo-border);
-    border-radius: var(--argo-radius-lg);
-    background: var(--argo-surface);
-    box-shadow: var(--argo-shadow);
-  }
   .changelog-heading {
-    padding: clamp(4rem, 10vw, 9rem) clamp(1.25rem, 7vw, 7rem);
+    padding: clamp(4rem, 10vw, 9rem) var(--argo-section-gutter);
     border-bottom: 1px solid var(--argo-border);
     background:
       radial-gradient(circle at 75% 35%, var(--argo-blue-500), transparent 25%),
@@ -122,7 +111,7 @@ const date = new Intl.DateTimeFormat("en-US", {
     grid-template-columns: 4rem minmax(0, 1fr) auto;
     gap: clamp(1rem, 4vw, 4rem);
     align-items: center;
-    padding: clamp(1.5rem, 4vw, 3rem) clamp(1.25rem, 6vw, 6rem);
+    padding: clamp(1.5rem, 4vw, 3rem) var(--argo-section-gutter);
     text-decoration: none;
     transition: background 160ms ease;
   }
@@ -159,12 +148,6 @@ const date = new Intl.DateTimeFormat("en-US", {
     color: var(--argo-blue-400);
   }
   @media (max-width: 42rem) {
-    .changelog-frame {
-      width: 100%;
-      margin: 0;
-      border-inline: 0;
-      border-radius: 0;
-    }
     .release-list a {
       grid-template-columns: 2rem minmax(0, 1fr);
     }

@@ -1,4 +1,8 @@
-<section id="architecture" class="architecture" aria-labelledby="architecture-title">
+---
+import Icon from "../Icon.astro";
+---
+
+<section id="architecture" class="architecture" aria-labelledby="architecture-title" data-reveal>
   <div class="architecture-copy">
     <p class="section-index">03 / Architecture</p>
     <h2 id="architecture-title">The interface is temporary.<br />State is not.</h2>
@@ -6,25 +10,39 @@
       Argo keeps ordinary download work unprivileged. Only explicit Linux traffic operations cross a
       narrow, authenticated boundary to the capability-limited helper.
     </p>
-    <a href="/docs/architecture/">Explore the architecture <span aria-hidden="true">→</span></a>
+    <a href="/docs/architecture/">Explore the architecture <Icon name="arrow-right" size={17} /></a>
   </div>
   <div
     class="architecture-map"
     role="img"
     aria-label="Argo architecture from CLI and TUI through argod to download state and the optional privileged QoS helper"
   >
-    <div class="node client"><small>Interface</small><strong>argo CLI / TUI</strong></div>
+    <div class="node client">
+      <Icon name="terminal" /><small>Interface</small><strong>argo CLI / TUI</strong>
+    </div>
     <div class="connector ipc"><span>protected Unix IPC</span></div>
-    <div class="node daemon"><small>User daemon</small><strong>argod</strong></div>
+    <div class="node daemon">
+      <Icon name="server" /><small>User daemon</small><strong>argod</strong>
+    </div>
     <div class="branches" aria-hidden="true"></div>
-    <div class="node component"><small>Transfer</small><strong>downloader</strong></div>
-    <div class="node component"><small>Admission</small><strong>scheduler</strong></div>
-    <div class="node component"><small>Persistence</small><strong>SQLite</strong></div>
-    <div class="node component"><small>Awareness</small><strong>NetworkManager</strong></div>
+    <div class="node component">
+      <Icon name="route" /><small>Transfer</small><strong>downloader</strong>
+    </div>
+    <div class="node component">
+      <Icon name="activity" /><small>Admission</small><strong>scheduler</strong>
+    </div>
+    <div class="node component">
+      <Icon name="database" /><small>Persistence</small><strong>SQLite</strong>
+    </div>
+    <div class="node component">
+      <Icon name="network" /><small>Awareness</small><strong>NetworkManager</strong>
+    </div>
     <div class="node parts"><small>Internal state</small><strong>XDG parts</strong></div>
     <div class="node files"><small>User files</small><strong>Downloads</strong></div>
     <div class="boundary"><span>authenticated privileged boundary</span></div>
-    <div class="node helper"><small>CAP_NET_ADMIN</small><strong>argo-qosd</strong></div>
+    <div class="node helper">
+      <Icon name="shield" /><small>CAP_NET_ADMIN</small><strong>argo-qosd</strong>
+    </div>
     <div class="node kernel"><small>Classify</small><strong>nftables</strong></div>
     <div class="node kernel"><small>Shape RX</small><strong>tc / IFB</strong></div>
   </div>
@@ -35,7 +53,7 @@
     display: grid;
     grid-template-columns: minmax(19rem, 0.7fr) minmax(34rem, 1.3fr);
     gap: clamp(3rem, 8vw, 8rem);
-    padding: clamp(5rem, 10vw, 9rem) clamp(1.25rem, 6vw, 6rem);
+    padding: clamp(5rem, 10vw, 9rem) var(--argo-section-gutter);
   }
   .section-index {
     color: var(--argo-blue-400);
@@ -113,6 +131,15 @@
     overflow-wrap: anywhere;
     font-size: 0.85rem;
   }
+  .component strong {
+    overflow-wrap: normal;
+    font-size: clamp(0.68rem, 0.72vw, 0.8rem);
+  }
+  .node :global(svg) {
+    align-self: center;
+    margin-bottom: 0.55rem;
+    color: var(--argo-blue-400);
+  }
   .client,
   .daemon,
   .boundary,
@@ -139,6 +166,9 @@
     font-size: 0.62rem;
     text-align: center;
   }
+  .connector {
+    grid-column: 1 / -1;
+  }
   .connector::before,
   .boundary::before {
     position: absolute;
@@ -154,6 +184,11 @@
     padding: 0.25rem 0.5rem;
     background: var(--argo-blue-950);
   }
+  .connector::before,
+  .boundary::before,
+  .branches {
+    animation: connector-glow 4s ease-in-out infinite;
+  }
   .branches {
     grid-column: 1 / -1;
     height: 1px;
@@ -164,6 +199,16 @@
   .files,
   .kernel {
     grid-column: span 2;
+  }
+  @keyframes connector-glow {
+    0%,
+    100% {
+      opacity: 0.55;
+    }
+    50% {
+      opacity: 1;
+      filter: drop-shadow(0 0 0.35rem var(--argo-blue-400));
+    }
   }
   .parts,
   .files {
@@ -184,12 +229,22 @@
     .component {
       grid-column: span 1;
     }
+    .component strong {
+      overflow-wrap: anywhere;
+    }
     .client,
     .daemon,
     .boundary,
     .helper,
     .branches {
       grid-column: 1 / -1;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .connector::before,
+    .boundary::before,
+    .branches {
+      animation: none;
     }
   }
 </style>

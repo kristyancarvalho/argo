@@ -1,30 +1,47 @@
 ---
 import { project } from "../data/project";
+import Icon from "./Icon.astro";
 
 const links = [
-  { label: "Docs", href: "/docs/" },
-  { label: "Changelog", href: "/changelog/" },
-  { label: "Architecture", href: "/#architecture" },
+  { label: "Docs", href: "/docs/", icon: "book" as const },
+  { label: "Changelog", href: "/changelog/", icon: "history" as const },
+  { label: "Architecture", href: "/#architecture", icon: "network" as const },
 ];
 ---
 
 <header class="site-header">
-  <a class="brand" href="/" aria-label="Argo home">
-    <img src="/branding/logo/argo-logo-horizontal.svg" alt="Argo" width="182" height="56" />
-  </a>
-  <nav class="desktop-nav" aria-label="Primary navigation">
-    {links.map((link) => <a href={link.href}>{link.label}</a>)}
-    <a class="github-link" href={project.repository}>GitHub</a>
-    <a class="nav-cta" href="#quick-start">Get started</a>
-  </nav>
-  <details class="mobile-nav">
-    <summary aria-label="Open navigation">Menu</summary>
-    <nav aria-label="Mobile navigation">
-      {links.map((link) => <a href={link.href}>{link.label}</a>)}
-      <a href={project.repository}>GitHub</a>
-      <a href="#quick-start">Get started</a>
+  <div class="header-inner">
+    <a class="brand" href="/" aria-label="Argo home">
+      <img src="/branding/logo/argo-logo-horizontal.svg" alt="Argo" width="182" height="56" />
+    </a>
+    <nav class="desktop-nav" aria-label="Primary navigation">
+      {
+        links.map((link) => (
+          <a href={link.href}>
+            <Icon name={link.icon} size={16} />
+            {link.label}
+          </a>
+        ))
+      }
+      <a class="github-link" href={project.repository}><Icon name="github" size={16} />GitHub</a>
+      <a class="nav-cta" href="/#quick-start">Get started<Icon name="arrow-right" size={16} /></a>
     </nav>
-  </details>
+    <details class="mobile-nav">
+      <summary aria-label="Open navigation"><Icon name="menu" size={18} />Menu</summary>
+      <nav aria-label="Mobile navigation">
+        {
+          links.map((link) => (
+            <a href={link.href}>
+              <Icon name={link.icon} size={16} />
+              {link.label}
+            </a>
+          ))
+        }
+        <a href={project.repository}><Icon name="github" size={16} />GitHub</a>
+        <a href="/#quick-start"><Icon name="arrow-right" size={16} />Get started</a>
+      </nav>
+    </details>
+  </div>
 </header>
 
 <style>
@@ -34,10 +51,17 @@ const links = [
     display: flex;
     min-height: 5.25rem;
     align-items: center;
-    justify-content: space-between;
-    padding: 0.75rem clamp(1rem, 3vw, 2.5rem);
     border-bottom: 1px solid var(--argo-border);
     background: var(--argo-surface);
+  }
+  .header-inner {
+    display: flex;
+    width: min(100%, 112rem);
+    min-height: inherit;
+    align-items: center;
+    justify-content: space-between;
+    margin: 0 auto;
+    padding: 0.75rem clamp(1rem, 4vw, 4rem);
   }
   .brand {
     display: inline-flex;
@@ -61,6 +85,9 @@ const links = [
     text-decoration: none;
   }
   nav a {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
     padding: 0.7rem 0.9rem;
   }
   nav a:hover {
@@ -83,6 +110,9 @@ const links = [
     display: none;
   }
   .mobile-nav summary {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
     padding: 0.7rem 0.8rem;
     border: 1px solid var(--argo-border);
     cursor: pointer;
@@ -102,6 +132,9 @@ const links = [
     border-radius: var(--argo-radius-md);
     background: var(--argo-surface-raised);
     box-shadow: var(--argo-shadow);
+  }
+  .mobile-nav nav a {
+    display: flex;
   }
   @media (max-width: 53rem) {
     .desktop-nav {
