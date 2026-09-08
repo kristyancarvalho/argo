@@ -1,9 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="174" height="34" viewBox="0 0 174 34" role="img" aria-labelledby="title description">
+<svg xmlns="http://www.w3.org/2000/svg" width="190" height="34" viewBox="0 0 190 34" role="img" aria-labelledby="title description">
   <title id="title">Platform: Linux</title>
   <desc id="description">Argo is a Linux-first project</desc>
-  <rect width="174" height="34" rx="8" fill="#071A33"/>
-  <path d="M8 0H98V34H8A8 8 0 0 1 0 26V8A8 8 0 0 1 8 0Z" fill="#0E5AA7"/>
+  <rect width="190" height="34" rx="8" fill="#071A33"/>
+  <path d="M8 0H120V34H8A8 8 0 0 1 0 26V8A8 8 0 0 1 8 0Z" fill="#0E5AA7"/>
   <circle cx="18" cy="17" r="4" fill="#65B8FF"/>
   <text x="29" y="22" fill="#D8EEFF" font-family="DejaVu Sans,Arial,sans-serif" font-size="13" font-weight="700">PLATFORM</text>
-  <text x="110" y="22" fill="#F7FBFF" font-family="DejaVu Sans,Arial,sans-serif" font-size="13">Linux</text>
+  <text x="132" y="22" fill="#F7FBFF" font-family="DejaVu Sans,Arial,sans-serif" font-size="13">Linux</text>
 </svg>
