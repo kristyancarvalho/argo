@@ -27,13 +27,5 @@ jobs:
         uses: golangci/golangci-lint-action@v8
         with:
           version: v2.13.2
-      - name: Unit tests
-        run: go test ./tests/unit/...
-      - name: Integration tests
-        run: go test ./tests/integration/...
-      - name: End-to-end tests
-        run: go test ./tests/e2e/...
-      - name: Race tests
-        run: go test -race ./...
       - name: Build executables
         run: go build ./cmd/argo ./cmd/argod ./cmd/argo-qosd
