@@ -87,6 +87,19 @@ func TestReadmeBrandingAndLocalLinksResolve(t *testing.T) {
 	if !strings.Contains(readme, "actions/workflows/ci.yml/badge.svg?branch=main") {
 		t.Fatal("README does not contain the live main-branch CI badge")
 	}
+	for _, expected := range []string{
+		"img.shields.io/github/actions/workflow/status/kristyancarvalho/argo/tests.yml",
+		"branch=dev",
+		"label=TESTS",
+		"labelColor=0E5AA7",
+		"actions/workflows/tests.yml?query=branch%3Adev",
+		"`CI` reports formatting, vet, lint, and executable builds on `main`.",
+		"`TESTS` reports the dedicated unit, integration, safe end-to-end, and race suite on `dev`.",
+	} {
+		if !strings.Contains(readme, expected) {
+			t.Fatalf("README does not contain dynamic test status content %q", expected)
+		}
+	}
 	patterns := []*regexp.Regexp{
 		regexp.MustCompile(`(?:src|href)="([^"]+)"`),
 		regexp.MustCompile(`\[[^]]*\]\(([^)]+)\)`),
