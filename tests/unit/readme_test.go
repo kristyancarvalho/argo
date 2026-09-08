@@ -103,3 +103,37 @@ func TestReadmeBrandingAndLocalLinksResolve(t *testing.T) {
 		}
 	}
 }
+
+func TestReadmeUsesStructuredArchitectureAndRepositoryLayout(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join(repositoryRoot(t), "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	readme := string(content)
+	for _, required := range []string{
+		"```mermaid\nflowchart TD",
+		"Client[\"argo CLI / TUI\"]",
+		"Daemon[\"argod\"]",
+		"Helper[\"argo-qosd\"]",
+		"NFT[\"nftables / conntrack\"]",
+		"TC[\"tc / IFB\"]",
+		"| Path | Purpose |",
+		"| `assets/branding/` |",
+		"| `tests/e2e/` |",
+	} {
+		if !strings.Contains(readme, required) {
+			t.Fatalf("README does not contain structured content %q", required)
+		}
+	}
+	if strings.Contains(readme, "BRAND"+".md") {
+		t.Fatal("README still references the removed public brand guide")
+	}
+	blocks := regexp.MustCompile("(?s)```([^\\n]*)\\n(.*?)```").FindAllStringSubmatch(readme, -1)
+	for _, block := range blocks {
+		switch strings.TrimSpace(block[1]) {
+		case "sh", "toml", "mermaid":
+		default:
+			t.Fatalf("README contains a non-command diagrammatic code block with language %q", block[1])
+		}
+	}
+}
