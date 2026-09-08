@@ -13,7 +13,10 @@ Argo is a terminal-first download manager for Linux. A persistent user daemon ha
   <img src="assets/branding/widgets/platform-linux.svg" alt="Platform: Linux" height="28">
   <a href="LICENSE"><img src="assets/branding/widgets/license-gpl3.svg" alt="License: GPL-3.0-or-later" height="28"></a>
   <a href="https://github.com/kristyancarvalho/argo/actions/workflows/ci.yml"><img src="https://github.com/kristyancarvalho/argo/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI status"></a>
+  <a href="https://github.com/kristyancarvalho/argo/actions/workflows/tests.yml?query=branch%3Adev"><img src="https://img.shields.io/github/actions/workflow/status/kristyancarvalho/argo/tests.yml?branch=dev&amp;label=TESTS&amp;labelColor=0E5AA7&amp;style=flat" alt="Automated tests status"></a>
 </p>
+
+`CI` reports formatting, vet, lint, and executable builds on `main`. `TESTS` reports the dedicated unit, integration, safe end-to-end, and race suite on `dev`.
 
 ## Table of contents
 
@@ -289,7 +292,7 @@ Run the local CI-equivalent suite:
 make check
 ```
 
-Useful focused targets are `make format-check`, `make vet`, `make lint`, `make test-unit`, `make test-integration`, `make test-e2e`, `make test-race`, and `make build`. CI executes formatting, vet, golangci-lint, all three test layers, the race detector, and builds for every executable.
+Useful focused targets are `make format-check`, `make vet`, `make lint`, `make test-unit`, `make test-integration`, `make test-e2e`, `make test-race`, and `make build`. The general CI workflow executes formatting, vet, golangci-lint, and builds for every executable. The dedicated Tests workflow executes all three test layers and the race detector.
 
 The isolated kernel QoS tests are capability-gated and skip when the required namespace and traffic-control facilities are unavailable. They never require changing the developer's ordinary host network configuration.
 
