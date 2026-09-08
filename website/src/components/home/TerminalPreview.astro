@@ -1,0 +1,141 @@
+<section id="quick-start" class="terminal-section" aria-labelledby="terminal-title">
+  <div class="section-copy">
+    <p class="section-index">01 / Terminal first</p>
+    <h2 id="terminal-title">The interface leaves.<br />The transfer stays.</h2>
+    <p>
+      <code>argod</code> owns persistent work. Use the focused CLI for scripts, open the TUI when you
+      need a dashboard, or close both and let the daemon continue.
+    </p>
+  </div>
+  <div
+    class="terminal"
+    role="img"
+    aria-label="Argo command line adding and listing a Linux image download"
+  >
+    <div class="terminal-bar"><span></span><span></span><span></span><p>argo — zsh</p></div>
+    <pre><code><span class="prompt">$</span> argo add https://example.org/linux.iso
+<span class="success">Added a92f4c8e linux.iso (queued)</span>
+
+<span class="prompt">$</span> argo list
+<span class="muted">ID        STATUS        PROGRESS   FILENAME</span>
+a92f4c8e  <span class="active">downloading</span>   72%        linux.iso
+
+<span class="prompt">$</span> argo status
+Daemon: running
+Network: connected
+Interface: wlan0
+Traffic policy: balanced
+QoS shaping: active</code></pre>
+    <div class="terminal-status">
+      <span><i class="status-dot"></i> daemon running</span><span>31.4 MB/s</span>
+    </div>
+  </div>
+</section>
+
+<style>
+  .terminal-section {
+    display: grid;
+    grid-template-columns: minmax(17rem, 0.75fr) minmax(32rem, 1.25fr);
+    gap: clamp(3rem, 8vw, 8rem);
+    align-items: center;
+    padding: clamp(5rem, 10vw, 9rem) clamp(1.25rem, 6vw, 6rem);
+  }
+  .section-index {
+    color: var(--argo-blue-400);
+    font-family: var(--argo-font-mono);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  h2 {
+    margin: 1.5rem 0;
+    font-family: var(--argo-font-display);
+    font-size: clamp(2.8rem, 5.5vw, 5rem);
+    font-weight: 400;
+    letter-spacing: -0.055em;
+    line-height: 0.95;
+  }
+  .section-copy > p:last-child {
+    max-width: 31rem;
+    color: var(--argo-text-muted);
+    line-height: 1.7;
+  }
+  .terminal {
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid var(--argo-border);
+    border-radius: var(--argo-radius-md);
+    background: var(--argo-blue-950);
+    box-shadow: 1.5rem 2rem 0 var(--argo-blue-900);
+  }
+  .terminal-bar,
+  .terminal-status {
+    display: flex;
+    align-items: center;
+    border-color: var(--argo-border);
+    color: var(--argo-text-muted);
+    font-family: var(--argo-font-mono);
+    font-size: 0.7rem;
+  }
+  .terminal-bar {
+    gap: 0.45rem;
+    padding: 0.7rem 1rem;
+    border-bottom: 1px solid var(--argo-border);
+    background: var(--argo-surface-raised);
+  }
+  .terminal-bar span {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background: var(--argo-border);
+  }
+  .terminal-bar p {
+    margin: 0 auto;
+    padding-right: 2.2rem;
+  }
+  pre {
+    min-height: 22rem;
+    margin: 0;
+    overflow-x: auto;
+    padding: clamp(1.25rem, 4vw, 2.5rem);
+    font-family: var(--argo-font-mono);
+    font-size: clamp(0.7rem, 1.35vw, 0.88rem);
+    line-height: 1.75;
+  }
+  .prompt,
+  .active {
+    color: var(--argo-blue-400);
+  }
+  .success,
+  .status-dot {
+    color: var(--argo-success);
+  }
+  .muted {
+    color: var(--argo-text-muted);
+  }
+  .terminal-status {
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    border-top: 1px solid var(--argo-border);
+  }
+  .terminal-status span {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+  }
+  .status-dot {
+    width: 0.45rem;
+    height: 0.45rem;
+    border-radius: 50%;
+    background: currentColor;
+  }
+  @media (max-width: 62rem) {
+    .terminal-section {
+      grid-template-columns: 1fr;
+    }
+    .terminal {
+      box-shadow: 0.8rem 1rem 0 var(--argo-blue-900);
+    }
+  }
+</style>

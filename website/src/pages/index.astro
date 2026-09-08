@@ -1,59 +1,117 @@
 ---
-import SiteLayout from "../layouts/SiteLayout.astro";
+import Footer from "../components/Footer.astro";
+import Header from "../components/Header.astro";
+import Architecture from "../components/home/Architecture.astro";
+import Features from "../components/home/Features.astro";
+import Hero from "../components/home/Hero.astro";
+import ProjectStatus from "../components/home/ProjectStatus.astro";
+import TerminalPreview from "../components/home/TerminalPreview.astro";
 import { project } from "../data/project";
+import SiteLayout from "../layouts/SiteLayout.astro";
 ---
 
-<SiteLayout>
-  <main>
-    <section class="foundation" aria-labelledby="foundation-title">
-      <img src="/branding/logo/argo-logo-horizontal.svg" alt="Argo" width="325" height="100" />
-      <p>{project.status} · {project.version}</p>
-      <h1 id="foundation-title">{project.tagline}</h1>
-      <p>{project.description}</p>
-      <a href={project.repository}>View Argo on GitHub</a>
-    </section>
-  </main>
+<SiteLayout title={project.name} description={project.description}>
+  <a class="skip-link" href="#content">Skip to content</a>
+  <div class="page-frame">
+    <Header />
+    <main id="content">
+      <Hero />
+      <TerminalPreview />
+      <Features />
+      <Architecture />
+      <ProjectStatus />
+      <section class="final-cta" aria-labelledby="final-cta-title">
+        <img src="/branding/logo/argo-logo-mark.svg" alt="" width="88" height="88" />
+        <p>Ready to chart the route?</p>
+        <h2 id="final-cta-title">Start with the daemon.<br />Stay for the control.</h2>
+        <div>
+          <a href={`${project.repository}#quick-start`}>Read the documentation</a><a
+            href={project.repository}>Explore the source</a
+          >
+        </div>
+      </section>
+    </main>
+    <Footer />
+  </div>
 </SiteLayout>
 
 <style>
-  main {
-    display: grid;
-    min-height: 100vh;
-    place-items: center;
-    padding: 2rem;
+  .skip-link {
+    position: fixed;
+    z-index: 100;
+    top: 1rem;
+    left: 1rem;
+    padding: 0.7rem 1rem;
+    border-radius: var(--argo-radius-sm);
+    color: var(--argo-blue-950);
+    background: var(--argo-text);
+    transform: translateY(-200%);
   }
-
-  .foundation {
-    width: min(100%, 54rem);
-    padding: clamp(2rem, 7vw, 5rem);
+  .skip-link:focus {
+    transform: translateY(0);
+  }
+  .page-frame {
+    width: min(calc(100% - clamp(0rem, 2vw, 2rem)), var(--argo-content));
+    margin: clamp(0rem, 1vw, 1rem) auto;
+    overflow: clip;
     border: 1px solid var(--argo-border);
     border-radius: var(--argo-radius-lg);
     background: var(--argo-surface);
     box-shadow: var(--argo-shadow);
   }
-
-  img {
-    width: min(20rem, 100%);
-    height: auto;
+  .final-cta {
+    display: grid;
+    place-items: center;
+    padding: clamp(5rem, 12vw, 11rem) 1.25rem;
+    text-align: center;
+    background:
+      radial-gradient(circle at 50% 20%, var(--argo-blue-600), transparent 35%),
+      var(--argo-blue-950);
   }
-
-  h1 {
-    margin: 2rem 0 1rem;
+  .final-cta img {
+    width: 4rem;
+    height: 4rem;
+    margin-bottom: 2rem;
+  }
+  .final-cta p {
+    color: var(--argo-blue-400);
+    font-family: var(--argo-font-mono);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  .final-cta h2 {
+    margin: 1rem 0 2rem;
     font-family: var(--argo-font-display);
-    font-size: clamp(3rem, 10vw, 7rem);
+    font-size: clamp(3rem, 7vw, 6.5rem);
     font-weight: 400;
     letter-spacing: -0.06em;
     line-height: 0.9;
   }
-
-  p {
-    color: var(--argo-text-muted);
-    font-size: 1.1rem;
+  .final-cta div {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.75rem;
   }
-
-  a {
-    display: inline-block;
-    margin-top: 1rem;
-    color: var(--argo-blue-400);
+  .final-cta a {
+    padding: 0.85rem 1.1rem;
+    border: 1px solid var(--argo-border);
+    border-radius: var(--argo-radius-sm);
+    font-weight: 700;
+    text-decoration: none;
+  }
+  .final-cta a:first-child {
+    color: var(--argo-blue-950);
+    background: var(--argo-text);
+  }
+  @media (max-width: 40rem) {
+    .page-frame {
+      width: 100%;
+      margin: 0;
+      border-inline: 0;
+      border-radius: 0;
+    }
   }
 </style>

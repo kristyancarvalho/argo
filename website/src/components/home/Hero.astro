@@ -1,0 +1,196 @@
+---
+import { project } from "../../data/project";
+import NetworkFlow from "./NetworkFlow.astro";
+---
+
+<section class="hero" aria-labelledby="hero-title">
+  <div class="hero-copy">
+    <p class="eyebrow"><span></span> Linux-native download control</p>
+    <h1 id="hero-title">Control<br />the flow.</h1>
+    <p class="lede">
+      A persistent download manager that understands the network around it. Schedule transfers,
+      recover safely, and govern traffic from the terminal.
+    </p>
+    <div class="actions">
+      <a class="primary" href={`${project.repository}#quick-start`}>Get started</a>
+      <a class="secondary" href={project.repository}
+        >View on GitHub <span aria-hidden="true">↗</span></a
+      >
+    </div>
+  </div>
+  <NetworkFlow />
+  <div class="hero-cards" aria-label="Argo capabilities">
+    <article><p>01 / Persist</p><h2>Downloads outlive the terminal.</h2></article>
+    <article>
+      <p>02 / Schedule</p><h2>High, normal, and low priorities shape the queue.</h2>
+    </article>
+    <article>
+      <p>03 / Govern</p><h2>Optional Linux RX policies separate Argo from other traffic.</h2>
+    </article>
+  </div>
+</section>
+
+<style>
+  .hero {
+    position: relative;
+    display: grid;
+    min-height: min(52rem, calc(100vh - 7rem));
+    grid-template-columns: minmax(20rem, 0.88fr) minmax(30rem, 1.12fr);
+    overflow: hidden;
+    padding: clamp(2rem, 5vw, 5rem);
+    background:
+      linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--argo-blue-950) 88%, transparent),
+        transparent 70%
+      ),
+      radial-gradient(circle at 74% 48%, var(--argo-blue-500), transparent 32%),
+      linear-gradient(135deg, var(--argo-blue-700), var(--argo-blue-950));
+    isolation: isolate;
+  }
+  .hero::before {
+    position: absolute;
+    z-index: -1;
+    inset: 0;
+    background-image:
+      linear-gradient(
+        color-mix(in srgb, var(--argo-blue-100) 6%, transparent) 1px,
+        transparent 1px
+      ),
+      linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--argo-blue-100) 6%, transparent) 1px,
+        transparent 1px
+      );
+    background-size: 3rem 3rem;
+    content: "";
+    mask-image: linear-gradient(to bottom, black, transparent 78%);
+  }
+  .hero-copy {
+    position: relative;
+    z-index: 3;
+    align-self: center;
+    padding-bottom: 8rem;
+  }
+  .eyebrow {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    margin: 0 0 1.5rem;
+    color: var(--argo-blue-100);
+    font-family: var(--argo-font-mono);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+  }
+  .eyebrow span {
+    width: 0.45rem;
+    height: 0.45rem;
+    border-radius: 50%;
+    background: var(--argo-blue-400);
+    box-shadow: 0 0 0.8rem var(--argo-blue-400);
+  }
+  h1 {
+    max-width: 8ch;
+    margin: 0;
+    font-family: var(--argo-font-display);
+    font-size: clamp(4.7rem, 9.4vw, 9.2rem);
+    font-weight: 400;
+    letter-spacing: -0.075em;
+    line-height: 0.77;
+  }
+  .lede {
+    max-width: 35rem;
+    margin: 2.25rem 0 0;
+    color: var(--argo-blue-100);
+    font-size: clamp(1rem, 1.4vw, 1.2rem);
+    line-height: 1.6;
+  }
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 2rem;
+  }
+  .actions a {
+    padding: 0.85rem 1.15rem;
+    border-radius: var(--argo-radius-sm);
+    font-size: 0.9rem;
+    font-weight: 750;
+    text-decoration: none;
+  }
+  .primary {
+    color: var(--argo-blue-950);
+    background: var(--argo-text);
+  }
+  .secondary {
+    border: 1px solid color-mix(in srgb, var(--argo-blue-100) 45%, transparent);
+    background: color-mix(in srgb, var(--argo-blue-950) 35%, transparent);
+  }
+  .hero-cards {
+    position: absolute;
+    right: clamp(1rem, 4vw, 4rem);
+    bottom: clamp(1rem, 3vw, 2.5rem);
+    left: clamp(1rem, 4vw, 4rem);
+    z-index: 5;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--argo-blue-100) 25%, transparent);
+    border-radius: var(--argo-radius-md);
+    background: color-mix(in srgb, var(--argo-blue-100) 18%, transparent);
+    backdrop-filter: blur(0.8rem);
+  }
+  .hero-cards article {
+    min-height: 8rem;
+    padding: 1.25rem;
+    background: color-mix(in srgb, var(--argo-blue-950) 78%, transparent);
+  }
+  .hero-cards p {
+    margin: 0 0 0.8rem;
+    color: var(--argo-blue-400);
+    font-family: var(--argo-font-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .hero-cards h2 {
+    max-width: 26rem;
+    margin: 0;
+    font-size: clamp(0.9rem, 1.25vw, 1.05rem);
+    line-height: 1.4;
+  }
+  @media (max-width: 65rem) {
+    .hero {
+      grid-template-columns: 1fr;
+      padding-bottom: 2rem;
+    }
+    .hero-copy {
+      padding-bottom: 0;
+    }
+    .hero-cards {
+      position: relative;
+      right: auto;
+      bottom: auto;
+      left: auto;
+      grid-column: 1;
+      grid-template-columns: 1fr;
+      margin-top: 1rem;
+    }
+    .hero-cards article {
+      min-height: 0;
+    }
+  }
+  @media (max-width: 38rem) {
+    .hero {
+      min-height: 0;
+      grid-template-columns: minmax(0, 1fr);
+      padding: 3rem 1.25rem 1.25rem;
+    }
+    h1 {
+      font-size: clamp(4rem, 22vw, 6rem);
+    }
+  }
+</style>

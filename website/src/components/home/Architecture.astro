@@ -1,0 +1,197 @@
+<section id="architecture" class="architecture" aria-labelledby="architecture-title">
+  <div class="architecture-copy">
+    <p class="section-index">03 / Architecture</p>
+    <h2 id="architecture-title">The interface is temporary.<br />State is not.</h2>
+    <p>
+      Argo keeps ordinary download work unprivileged. Only explicit Linux traffic operations cross a
+      narrow, authenticated boundary to the capability-limited helper.
+    </p>
+    <a href="https://github.com/kristyancarvalho/argo#architecture"
+      >Explore the architecture <span aria-hidden="true">→</span></a
+    >
+  </div>
+  <div
+    class="architecture-map"
+    role="img"
+    aria-label="Argo architecture from CLI and TUI through argod to download state and the optional privileged QoS helper"
+  >
+    <div class="node client"><small>Interface</small><strong>argo CLI / TUI</strong></div>
+    <div class="connector ipc"><span>protected Unix IPC</span></div>
+    <div class="node daemon"><small>User daemon</small><strong>argod</strong></div>
+    <div class="branches" aria-hidden="true"></div>
+    <div class="node component"><small>Transfer</small><strong>downloader</strong></div>
+    <div class="node component"><small>Admission</small><strong>scheduler</strong></div>
+    <div class="node component"><small>Persistence</small><strong>SQLite</strong></div>
+    <div class="node component"><small>Awareness</small><strong>NetworkManager</strong></div>
+    <div class="node parts"><small>Internal state</small><strong>XDG parts</strong></div>
+    <div class="node files"><small>User files</small><strong>Downloads</strong></div>
+    <div class="boundary"><span>authenticated privileged boundary</span></div>
+    <div class="node helper"><small>CAP_NET_ADMIN</small><strong>argo-qosd</strong></div>
+    <div class="node kernel"><small>Classify</small><strong>nftables</strong></div>
+    <div class="node kernel"><small>Shape RX</small><strong>tc / IFB</strong></div>
+  </div>
+</section>
+
+<style>
+  .architecture {
+    display: grid;
+    grid-template-columns: minmax(19rem, 0.7fr) minmax(34rem, 1.3fr);
+    gap: clamp(3rem, 8vw, 8rem);
+    padding: clamp(5rem, 10vw, 9rem) clamp(1.25rem, 6vw, 6rem);
+  }
+  .section-index {
+    color: var(--argo-blue-400);
+    font-family: var(--argo-font-mono);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  h2 {
+    margin: 1.5rem 0;
+    font-family: var(--argo-font-display);
+    font-size: clamp(3rem, 5.5vw, 5rem);
+    font-weight: 400;
+    letter-spacing: -0.055em;
+    line-height: 0.94;
+  }
+  .architecture-copy > p:last-of-type {
+    max-width: 34rem;
+    color: var(--argo-text-muted);
+    line-height: 1.7;
+  }
+  .architecture-copy a {
+    display: inline-flex;
+    gap: 0.5rem;
+    margin-top: 1rem;
+    color: var(--argo-blue-400);
+    font-weight: 700;
+    text-decoration: none;
+  }
+  .architecture-map {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1rem;
+    align-items: stretch;
+    padding: clamp(1rem, 3vw, 2rem);
+    border: 1px solid var(--argo-border);
+    border-radius: var(--argo-radius-lg);
+    background:
+      linear-gradient(
+        color-mix(in srgb, var(--argo-blue-100) 4%, transparent) 1px,
+        transparent 1px
+      ),
+      linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--argo-blue-100) 4%, transparent) 1px,
+        transparent 1px
+      ),
+      var(--argo-blue-950);
+    background-size: 2rem 2rem;
+  }
+  .node {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    min-width: 0;
+    min-height: 5rem;
+    flex-direction: column;
+    justify-content: center;
+    padding: 1rem;
+    border: 1px solid var(--argo-border);
+    border-radius: var(--argo-radius-sm);
+    background: var(--argo-surface-raised);
+  }
+  .node small {
+    margin-bottom: 0.35rem;
+    color: var(--argo-blue-400);
+    font-family: var(--argo-font-mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .node strong {
+    overflow-wrap: anywhere;
+    font-size: 0.85rem;
+  }
+  .client,
+  .daemon,
+  .boundary,
+  .helper {
+    grid-column: 1 / -1;
+  }
+  .client,
+  .daemon,
+  .helper {
+    justify-self: center;
+    width: min(100%, 15rem);
+    text-align: center;
+  }
+  .connector,
+  .boundary {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    min-height: 2.6rem;
+    align-items: center;
+    justify-content: center;
+    color: var(--argo-text-muted);
+    font-family: var(--argo-font-mono);
+    font-size: 0.62rem;
+    text-align: center;
+  }
+  .connector::before,
+  .boundary::before {
+    position: absolute;
+    z-index: -1;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    border-left: 1px solid var(--argo-blue-400);
+    content: "";
+  }
+  .connector span,
+  .boundary span {
+    padding: 0.25rem 0.5rem;
+    background: var(--argo-blue-950);
+  }
+  .branches {
+    grid-column: 1 / -1;
+    height: 1px;
+    margin-inline: 12%;
+    background: var(--argo-blue-400);
+  }
+  .parts,
+  .files,
+  .kernel {
+    grid-column: span 2;
+  }
+  .parts,
+  .files {
+    background: var(--argo-surface);
+  }
+  .kernel {
+    border-color: var(--argo-blue-600);
+  }
+  @media (max-width: 68rem) {
+    .architecture {
+      grid-template-columns: 1fr;
+    }
+  }
+  @media (max-width: 38rem) {
+    .architecture-map {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .component {
+      grid-column: span 1;
+    }
+    .client,
+    .daemon,
+    .boundary,
+    .helper,
+    .branches {
+      grid-column: 1 / -1;
+    }
+  }
+</style>

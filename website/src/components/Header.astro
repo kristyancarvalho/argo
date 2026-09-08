@@ -1,0 +1,114 @@
+---
+import { project } from "../data/project";
+
+const links = [
+  { label: "Docs", href: `${project.repository}#readme` },
+  { label: "Changelog", href: `${project.repository}/releases` },
+  { label: "Architecture", href: "#architecture" },
+];
+---
+
+<header class="site-header">
+  <a class="brand" href="/" aria-label="Argo home">
+    <img src="/branding/logo/argo-logo-horizontal.svg" alt="Argo" width="182" height="56" />
+  </a>
+  <nav class="desktop-nav" aria-label="Primary navigation">
+    {links.map((link) => <a href={link.href}>{link.label}</a>)}
+    <a class="github-link" href={project.repository}>GitHub</a>
+    <a class="nav-cta" href="#quick-start">Get started</a>
+  </nav>
+  <details class="mobile-nav">
+    <summary aria-label="Open navigation">Menu</summary>
+    <nav aria-label="Mobile navigation">
+      {links.map((link) => <a href={link.href}>{link.label}</a>)}
+      <a href={project.repository}>GitHub</a>
+      <a href="#quick-start">Get started</a>
+    </nav>
+  </details>
+</header>
+
+<style>
+  .site-header {
+    position: relative;
+    z-index: 20;
+    display: flex;
+    min-height: 5.25rem;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem clamp(1rem, 3vw, 2.5rem);
+    border-bottom: 1px solid var(--argo-border);
+    background: var(--argo-surface);
+  }
+  .brand {
+    display: inline-flex;
+    align-items: center;
+  }
+  .brand img {
+    width: 9.5rem;
+    height: auto;
+  }
+  .desktop-nav {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+  }
+  nav a,
+  summary {
+    border-radius: var(--argo-radius-sm);
+    color: var(--argo-text-muted);
+    font-size: 0.9rem;
+    font-weight: 650;
+    text-decoration: none;
+  }
+  nav a {
+    padding: 0.7rem 0.9rem;
+  }
+  nav a:hover {
+    color: var(--argo-text);
+    background: var(--argo-surface-raised);
+  }
+  .github-link {
+    margin-left: 0.4rem;
+    border: 1px solid var(--argo-border);
+  }
+  .nav-cta {
+    color: var(--argo-blue-950);
+    background: var(--argo-blue-400);
+  }
+  .nav-cta:hover {
+    color: var(--argo-blue-950);
+    background: var(--argo-blue-200);
+  }
+  .mobile-nav {
+    display: none;
+  }
+  .mobile-nav summary {
+    padding: 0.7rem 0.8rem;
+    border: 1px solid var(--argo-border);
+    cursor: pointer;
+    list-style: none;
+  }
+  .mobile-nav summary::-webkit-details-marker {
+    display: none;
+  }
+  .mobile-nav nav {
+    position: absolute;
+    top: calc(100% + 0.5rem);
+    right: 1rem;
+    display: grid;
+    min-width: 13rem;
+    padding: 0.5rem;
+    border: 1px solid var(--argo-border);
+    border-radius: var(--argo-radius-md);
+    background: var(--argo-surface-raised);
+    box-shadow: var(--argo-shadow);
+  }
+  @media (max-width: 53rem) {
+    .desktop-nav {
+      display: none;
+    }
+    .mobile-nav {
+      display: block;
+    }
+  }
+</style>
