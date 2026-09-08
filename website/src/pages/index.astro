@@ -1,6 +1,7 @@
 ---
 import Footer from "../components/Footer.astro";
 import Header from "../components/Header.astro";
+import Icon from "../components/Icon.astro";
 import Architecture from "../components/home/Architecture.astro";
 import Features from "../components/home/Features.astro";
 import Hero from "../components/home/Hero.astro";
@@ -12,28 +13,44 @@ import SiteLayout from "../layouts/SiteLayout.astro";
 
 <SiteLayout title={project.name} description={project.description}>
   <a class="skip-link" href="#content">Skip to content</a>
-  <div class="page-frame">
-    <Header />
-    <main id="content">
-      <Hero />
-      <TerminalPreview />
-      <Features />
-      <Architecture />
-      <ProjectStatus />
-      <section class="final-cta" aria-labelledby="final-cta-title">
-        <img src="/branding/logo/argo-logo-mark.svg" alt="" width="88" height="88" />
-        <p>Ready to chart the route?</p>
-        <h2 id="final-cta-title">Start with the daemon.<br />Stay for the control.</h2>
-        <div>
-          <a href="/docs/">Read the documentation</a><a href={project.repository}
-            >Explore the source</a
-          >
-        </div>
-      </section>
-    </main>
-    <Footer />
-  </div>
+  <Header />
+  <main id="content">
+    <Hero />
+    <TerminalPreview />
+    <Features />
+    <Architecture />
+    <ProjectStatus />
+    <section class="final-cta" aria-labelledby="final-cta-title" data-reveal>
+      <img src="/branding/logo/argo-logo-mark.svg" alt="" width="88" height="88" />
+      <p>Ready to chart the route?</p>
+      <h2 id="final-cta-title">Start with the daemon.<br />Stay for the control.</h2>
+      <div>
+        <a href="/docs/"><Icon name="book" size={18} />Read the documentation</a><a
+          href={project.repository}><Icon name="github" size={18} />Explore the source</a
+        >
+      </div>
+    </section>
+  </main>
+  <Footer />
 </SiteLayout>
+
+<script>
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  if (!reducedMotion.matches && "IntersectionObserver" in window) {
+    document.documentElement.classList.add("reveal-ready");
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          entry.target.classList.add("is-visible");
+          observer.unobserve(entry.target);
+        }
+      },
+      { rootMargin: "0px 0px -8%", threshold: 0.08 },
+    );
+    document.querySelectorAll("[data-reveal]").forEach((section) => observer.observe(section));
+  }
+</script>
 
 <style>
   .skip-link {
@@ -49,15 +66,6 @@ import SiteLayout from "../layouts/SiteLayout.astro";
   }
   .skip-link:focus {
     transform: translateY(0);
-  }
-  .page-frame {
-    width: min(calc(100% - clamp(0rem, 2vw, 2rem)), var(--argo-content));
-    margin: clamp(0rem, 1vw, 1rem) auto;
-    overflow: clip;
-    border: 1px solid var(--argo-border);
-    border-radius: var(--argo-radius-lg);
-    background: var(--argo-surface);
-    box-shadow: var(--argo-shadow);
   }
   .final-cta {
     display: grid;
@@ -96,6 +104,9 @@ import SiteLayout from "../layouts/SiteLayout.astro";
     gap: 0.75rem;
   }
   .final-cta a {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
     padding: 0.85rem 1.1rem;
     border: 1px solid var(--argo-border);
     border-radius: var(--argo-radius-sm);
@@ -106,12 +117,17 @@ import SiteLayout from "../layouts/SiteLayout.astro";
     color: var(--argo-blue-950);
     background: var(--argo-text);
   }
-  @media (max-width: 40rem) {
-    .page-frame {
-      width: 100%;
-      margin: 0;
-      border-inline: 0;
-      border-radius: 0;
+  @media (prefers-reduced-motion: no-preference) {
+    :global(.reveal-ready [data-reveal]) {
+      opacity: 0;
+      transform: translateY(1.5rem);
+      transition:
+        opacity 600ms ease,
+        transform 600ms ease;
+    }
+    :global(.reveal-ready [data-reveal].is-visible) {
+      opacity: 1;
+      transform: translateY(0);
     }
   }
 </style>

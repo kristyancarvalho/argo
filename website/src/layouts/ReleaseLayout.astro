@@ -19,29 +19,27 @@ const formattedDate = release.data.date.toLocaleDateString("en-US", {
 
 <SiteLayout title={release.data.title} description={release.data.description}>
   <a class="skip-link" href="#release-content">Skip to release notes</a>
-  <div class="release-frame">
-    <Header />
-    <main id="release-content">
-      <header class="release-heading">
-        <a href="/changelog/">Changelog</a>
-        <p>
-          {release.data.version} · <time datetime={release.data.date.toISOString()}
-            >{formattedDate}</time
-          >
-        </p>
-        <h1>{release.data.title}</h1>
-        <p class="description">{release.data.description}</p>
-      </header>
-      <article class="release-body"><slot /></article>
-      <nav class="release-nav" aria-label="Release navigation">
-        <a href="/changelog/">← All releases</a>
-        <a href={`https://github.com/kristyancarvalho/argo/releases/tag/${release.data.version}`}
-          >GitHub release ↗</a
+  <Header />
+  <main id="release-content">
+    <header class="release-heading">
+      <a href="/changelog/">Changelog</a>
+      <p>
+        {release.data.version} · <time datetime={release.data.date.toISOString()}
+          >{formattedDate}</time
         >
-      </nav>
-    </main>
-    <Footer />
-  </div>
+      </p>
+      <h1>{release.data.title}</h1>
+      <p class="description">{release.data.description}</p>
+    </header>
+    <article class="release-body"><slot /></article>
+    <nav class="release-nav" aria-label="Release navigation">
+      <a href="/changelog/">← All releases</a>
+      <a href={`https://github.com/kristyancarvalho/argo/releases/tag/${release.data.version}`}
+        >GitHub release ↗</a
+      >
+    </nav>
+  </main>
+  <Footer />
 </SiteLayout>
 
 <style>
@@ -58,20 +56,11 @@ const formattedDate = release.data.date.toLocaleDateString("en-US", {
   .skip-link:focus {
     transform: translateY(0);
   }
-  .release-frame {
-    width: min(calc(100% - 2rem), var(--argo-content));
-    margin: 1rem auto;
-    overflow: clip;
-    border: 1px solid var(--argo-border);
-    border-radius: var(--argo-radius-lg);
-    background: var(--argo-surface);
-    box-shadow: var(--argo-shadow);
-  }
   main {
     min-height: 70vh;
   }
   .release-heading {
-    padding: clamp(4rem, 9vw, 8rem) clamp(1.25rem, 10vw, 10rem) clamp(3rem, 7vw, 6rem);
+    padding: clamp(4rem, 9vw, 8rem) var(--argo-section-gutter) clamp(3rem, 7vw, 6rem);
     border-bottom: 1px solid var(--argo-border);
     background:
       radial-gradient(circle at 80% 10%, var(--argo-blue-600), transparent 30%),
@@ -139,12 +128,6 @@ const formattedDate = release.data.date.toLocaleDateString("en-US", {
     text-decoration: none;
   }
   @media (max-width: 40rem) {
-    .release-frame {
-      width: 100%;
-      margin: 0;
-      border-inline: 0;
-      border-radius: 0;
-    }
     .release-nav {
       align-items: flex-start;
       flex-direction: column;

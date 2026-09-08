@@ -2,7 +2,7 @@
 import { project } from "../../data/project";
 ---
 
-<section class="project-status" aria-labelledby="status-title">
+<section class="project-status" aria-labelledby="status-title" data-reveal>
   <div class="status-heading">
     <p>04 / Current position</p>
     <h2 id="status-title">Functional.<br />Still evolving.</h2>
@@ -28,7 +28,7 @@ import { project } from "../../data/project";
     display: grid;
     grid-template-columns: 0.9fr 1.1fr;
     gap: clamp(3rem, 9vw, 9rem);
-    padding: clamp(5rem, 10vw, 9rem) clamp(1.25rem, 6vw, 6rem);
+    padding: clamp(5rem, 10vw, 9rem) var(--argo-section-gutter);
     border-top: 1px solid var(--argo-border);
     background: var(--argo-surface);
   }
