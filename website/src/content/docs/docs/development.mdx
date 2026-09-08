@@ -1,0 +1,48 @@
+---
+title: Building, testing, and workflow
+description: Work on Argo through its issue branches, repository test hierarchy, and local CI-equivalent commands.
+---
+
+## Build and validate
+
+```sh
+make build
+make check
+```
+
+`make build` compiles all three binaries. `make check` verifies formatting, vet, golangci-lint, unit tests, integration tests, safe end-to-end tests, the race detector, and executable builds.
+
+Focused targets include:
+
+```sh
+make format-check
+make vet
+make lint
+make test-unit
+make test-integration
+make test-e2e
+make test-race
+```
+
+Capability-gated QoS tests use isolated network namespaces when the required Linux facilities are available. They skip rather than mutate ordinary host network configuration when the environment cannot provide safe isolation.
+
+## Repository layout
+
+| Path                 | Purpose                                                    |
+| -------------------- | ---------------------------------------------------------- |
+| `cmd/`               | Entry points for `argo`, `argod`, and `argo-qosd`          |
+| `internal/`          | Private application packages and subsystem implementations |
+| `tests/unit/`        | Focused component and repository-contract tests            |
+| `tests/integration/` | Cross-component behavior tests                             |
+| `tests/e2e/`         | Binary, lifecycle, and isolated system tests               |
+| `packaging/systemd/` | User daemon and privileged helper units                    |
+| `assets/branding/`   | Canonical public visual assets                             |
+| `website/`           | Static institutional site and public documentation         |
+
+## Issue-driven workflow
+
+Releases are GitHub milestones. Every implementation starts from an issue assigned to a milestone and a branch named `issue/<number>-<slug>` created from `dev`. The issue PR targets `dev`; a completed milestone is promoted from `dev` to `main`, tagged, and released.
+
+Commit messages use `type(scope): summary`. Production Go files contain no comments. Every implementation issue adds or updates tests under the repository-level `/tests` hierarchy.
+
+The `specs/` directory contains local development material and is ignored. It is not part of the public website or release artifacts.

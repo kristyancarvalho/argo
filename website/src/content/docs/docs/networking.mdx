@@ -1,0 +1,43 @@
+---
+title: Network awareness and traffic policies
+description: Understand Argo NetworkManager state, scheduler priority, optional RX shaping, and adaptive latency policy.
+---
+
+Argo separates observing the network, scheduling its own work, and governing system traffic.
+
+## NetworkManager
+
+`argod` observes active connectivity, connection type, interface, and metered state over D-Bus. It recovers subscriptions after transient failures and reconciles policy when interfaces disconnect or change.
+
+When NetworkManager is unavailable, ordinary downloads continue where the host network still works. The daemon reports awareness as unavailable instead of pretending it has current interface state.
+
+## Priority is not policy
+
+Download priority (`low`, `normal`, or `high`) orders Argo's queued transfers. Traffic policy controls how active Argo connections compete with the default system class. Selecting high priority does not automatically enable kernel shaping.
+
+| Policy       | Current behavior                                                            |
+| ------------ | --------------------------------------------------------------------------- |
+| `off`        | No active Argo shaping state                                                |
+| `focus`      | Argo receives a 20% guaranteed class; unused capacity remains borrowable    |
+| `balanced`   | Argo and default traffic receive equal guaranteed classes                   |
+| `throughput` | Argo receives an 80% guaranteed class                                       |
+| `latency`    | A bounded controller adjusts Argo's ceiling from smoothed latency telemetry |
+
+```sh
+argo policy balanced
+argo status
+```
+
+Policy application also requires an active transfer, a connected interface, a nonzero `qos.link_rate`, and the `argo-qosd` helper. If those conditions are absent, the requested policy can remain selected while shaping is reported inactive or unavailable.
+
+## Receive-path shaping
+
+Argo identifies `argod` sockets through a cgroup selector, transfers that identity through conntrack, and redirects matching ingress packets to an Argo-owned IFB. HTB classes and `fq_codel` then shape the received payload path. This is distinct from merely limiting outbound TCP acknowledgements.
+
+The helper owns narrowly named nftables and `tc` objects and refuses arbitrary shell commands or invalid interface/rate inputs. It does not intentionally flush administrator rulesets or remove unrelated qdiscs.
+
+## Adaptive latency
+
+The latency policy establishes a baseline from multiple samples or an explicit `manual_baseline`. It changes the current Argo ceiling gradually within configured `min_rate` and `max_rate` bounds. Missing or stale telemetry produces a safe bounded state rather than an unbounded numerical decision.
+
+Use `argo status` to inspect measured latency, baseline, controller state, current rate, and helper errors. Results depend on a representative configured `probe_target`; an empty target means active latency sampling is unavailable.

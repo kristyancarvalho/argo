@@ -165,3 +165,60 @@ func TestWebsiteHomepageProvidesResponsiveAndAccessibleNavigation(t *testing.T) 
 		t.Fatal("decorative network visualization is exposed to assistive technology")
 	}
 }
+
+func TestStarlightDocumentationPortalHasSubstantivePublicGuides(t *testing.T) {
+	root := repositoryRoot(t)
+	required := []string{
+		"index.mdx",
+		"getting-started.mdx",
+		"downloads.mdx",
+		"configuration.mdx",
+		"networking.mdx",
+		"architecture.mdx",
+		"development.mdx",
+		"troubleshooting.mdx",
+	}
+	for _, name := range required {
+		content, err := os.ReadFile(filepath.Join(root, "website", "src", "content", "docs", "docs", name))
+		if err != nil {
+			t.Errorf("required documentation page %s: %v", name, err)
+			continue
+		}
+		if len(content) < 500 || !strings.HasPrefix(string(content), "---\n") {
+			t.Errorf("documentation page %s is not substantive or has no frontmatter", name)
+		}
+		for _, forbidden := range []string{"AUDIT-REPORT", "audit-evidence"} {
+			if strings.Contains(string(content), forbidden) {
+				t.Errorf("documentation page %s publishes internal material %s", name, forbidden)
+			}
+		}
+	}
+}
+
+func TestStarlightUsesArgoBrandingAndExplicitRoutes(t *testing.T) {
+	root := repositoryRoot(t)
+	config, err := os.ReadFile(filepath.Join(root, "website", "astro.config.mjs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	value := string(config)
+	for _, expected := range []string{
+		`from "@astrojs/starlight"`,
+		`src: "./public/branding/logo/argo-logo-horizontal.svg"`,
+		`customCss: ["./src/styles/starlight.css"]`,
+		`link: "/docs/"`,
+		`link: "/docs/architecture/"`,
+		`link: "/docs/troubleshooting/"`,
+	} {
+		if !strings.Contains(value, expected) {
+			t.Errorf("Starlight config does not contain %s", expected)
+		}
+	}
+	contentConfig, err := os.ReadFile(filepath.Join(root, "website", "src", "content.config.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(contentConfig), "docsLoader()") || !strings.Contains(string(contentConfig), "docsSchema()") {
+		t.Fatal("Starlight content collection does not use its loader and schema")
+	}
+}
