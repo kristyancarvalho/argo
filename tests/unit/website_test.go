@@ -269,6 +269,33 @@ func TestStarlightUsesArgoBrandingAndExplicitRoutes(t *testing.T) {
 	}
 }
 
+func TestStarlightThemeAndSearchOverridesRemainStateAware(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join(repositoryRoot(t), "website", "src", "styles", "starlight.css"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	value := string(content)
+	for _, expected := range []string{
+		"background: var(--sl-color-bg)",
+		`:root[data-theme="light"]`,
+		"--sl-color-bg-inline-code: var(--argo-blue-100)",
+		"--sl-color-text-accent: var(--argo-blue-600)",
+		"site-search dialog",
+		"height: max-content",
+		"min-height: 0",
+		"max-height: calc(100% - 8rem)",
+		"site-search .dialog-frame",
+		"flex-grow: 0",
+	} {
+		if !strings.Contains(value, expected) {
+			t.Errorf("Starlight theme/search contract does not contain %q", expected)
+		}
+	}
+	if strings.Contains(value, "body {\n  background: var(--argo-background)") {
+		t.Fatal("Starlight body is pinned to the dark Argo background")
+	}
+}
+
 func TestWebsiteChangelogCoversPublishedGitTags(t *testing.T) {
 	root := repositoryRoot(t)
 	files, err := filepath.Glob(filepath.Join(root, "website", "src", "content", "changelog", "v*.md"))
