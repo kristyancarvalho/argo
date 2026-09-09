@@ -147,7 +147,7 @@ func TestClearHistoryPreservesActiveAndPausedDownloads(t *testing.T) {
 	}
 }
 
-func newHistoryService(t *testing.T, store *storage.Store, engine *historyEngine) *daemon.Service {
+func newHistoryService(t *testing.T, store *storage.Store, engine daemon.DownloadEngine) *daemon.Service {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	service, err := daemon.NewService(ctx, store, engine)
