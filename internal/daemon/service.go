@@ -136,6 +136,8 @@ type Service struct {
 	closeErr           error
 	activeMutex        sync.Mutex
 	activeCancels      map[model.DownloadID]context.CancelFunc
+	activeDone         map[model.DownloadID]chan struct{}
+	lifecycle          chan struct{}
 	networkObserver    NetworkObserver
 	networkReady       chan struct{}
 	networkReadyOnce   sync.Once
@@ -295,6 +297,8 @@ func NewServiceWithOptions(
 		ctx:                ctx,
 		cancel:             cancel,
 		activeCancels:      make(map[model.DownloadID]context.CancelFunc),
+		activeDone:         make(map[model.DownloadID]chan struct{}),
+		lifecycle:          make(chan struct{}, 1),
 		networkObserver:    options.NetworkObserver,
 		networkReady:       make(chan struct{}),
 		pauseOnMetered:     options.PauseOnMetered,
@@ -332,6 +336,19 @@ func NewServiceWithOptions(
 }
 
 func (service *Service) Handle(ctx context.Context, request ipc.Request) (any, error) {
+	switch request.Operation {
+	case ipc.OperationPause, ipc.OperationResume, ipc.OperationCancel, ipc.OperationRemove, ipc.OperationClear:
+		select {
+		case service.lifecycle <- struct{}{}:
+			defer func() { <-service.lifecycle }()
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-service.ctx.Done():
+			return nil, service.ctx.Err()
+		}
+	case ipc.OperationStatus, ipc.OperationAdd, ipc.OperationPriority, ipc.OperationList,
+		ipc.OperationShow, ipc.OperationProfile, ipc.OperationPolicy, ipc.OperationRetry:
+	}
 	switch request.Operation {
 	case ipc.OperationStatus:
 		return service.statusResponse(), nil
@@ -518,6 +535,15 @@ func (service *Service) resume(ctx context.Context, payload json.RawMessage) (ip
 	if err != nil {
 		return ipc.DownloadActionResponse{}, err
 	}
+	if download.Status == model.StatusPaused || download.Status == model.StatusFailed || download.Status == model.StatusCanceled {
+		if err := service.waitActive(ctx, identifier); err != nil {
+			return ipc.DownloadActionResponse{}, err
+		}
+		download, err = service.store.Download(ctx, identifier)
+		if err != nil {
+			return ipc.DownloadActionResponse{}, err
+		}
+	}
 
 	var status model.Status
 	switch download.Status {
@@ -672,9 +698,26 @@ func (service *Service) remove(
 	ctx context.Context,
 	payload json.RawMessage,
 ) (ipc.DownloadActionResponse, error) {
-	identifier, download, err := service.actionDownload(ctx, payload)
+	identifier, _, err := service.actionDownload(ctx, payload)
 	if err != nil {
 		return ipc.DownloadActionResponse{}, err
+	}
+	return service.removeDownload(ctx, identifier)
+}
+
+func (service *Service) removeDownload(ctx context.Context, identifier model.DownloadID) (ipc.DownloadActionResponse, error) {
+	download, err := service.store.Download(ctx, identifier)
+	if err != nil {
+		return ipc.DownloadActionResponse{}, err
+	}
+	if download.Status == model.StatusCompleted || download.Status == model.StatusFailed || download.Status == model.StatusCanceled {
+		if err := service.waitActive(ctx, identifier); err != nil {
+			return ipc.DownloadActionResponse{}, err
+		}
+		download, err = service.store.Download(ctx, identifier)
+		if err != nil {
+			return ipc.DownloadActionResponse{}, err
+		}
 	}
 	switch download.Status {
 	case model.StatusCompleted:
@@ -702,23 +745,18 @@ func (service *Service) clearHistory(ctx context.Context) (ipc.ClearResponse, er
 	if err != nil {
 		return ipc.ClearResponse{}, err
 	}
+	removed := 0
 	for _, download := range downloads {
-		if download.Status != model.StatusFailed && download.Status != model.StatusCanceled {
+		if download.Status != model.StatusCompleted && download.Status != model.StatusFailed && download.Status != model.StatusCanceled {
 			continue
 		}
-		if service.partialCleaner == nil {
-			return ipc.ClearResponse{}, fmt.Errorf("download engine cannot clean partial state")
-		}
-		if err := service.partialCleaner.RemovePartial(download.ID); err != nil {
+		if _, err := service.removeDownload(ctx, download.ID); err != nil {
 			return ipc.ClearResponse{}, err
 		}
-	}
-	removed, err := service.store.ClearDownloadHistory(ctx)
-	if err != nil {
-		return ipc.ClearResponse{}, err
+		removed++
 	}
 
-	return ipc.ClearResponse{Removed: len(removed)}, nil
+	return ipc.ClearResponse{Removed: removed}, nil
 }
 
 func (service *Service) retry(ctx context.Context, payload json.RawMessage) (ipc.AddResponse, error) {
@@ -989,6 +1027,7 @@ func (service *Service) start(identifier model.DownloadID) {
 	downloadContext, cancel := context.WithCancel(service.ctx)
 	service.activeMutex.Lock()
 	service.activeCancels[identifier] = cancel
+	service.activeDone[identifier] = make(chan struct{})
 	service.activeMutex.Unlock()
 	service.waitGroup.Add(1)
 	go service.process(downloadContext, identifier, cancel)
@@ -1004,6 +1043,8 @@ func (service *Service) process(
 		cancel()
 		service.activeMutex.Lock()
 		delete(service.activeCancels, identifier)
+		close(service.activeDone[identifier])
+		delete(service.activeDone, identifier)
 		service.activeMutex.Unlock()
 		_ = service.reconcileTrafficPolicy(service.ctx)
 		select {
@@ -1032,6 +1073,23 @@ func (service *Service) cancelActive(identifier model.DownloadID) {
 		cancel()
 	}
 	service.activeMutex.Unlock()
+}
+
+func (service *Service) waitActive(ctx context.Context, identifier model.DownloadID) error {
+	service.activeMutex.Lock()
+	done := service.activeDone[identifier]
+	service.activeMutex.Unlock()
+	if done == nil {
+		return nil
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-service.ctx.Done():
+		return service.ctx.Err()
+	}
 }
 
 func decodePayload(payload json.RawMessage, destination any) error {
