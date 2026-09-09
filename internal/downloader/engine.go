@@ -138,6 +138,7 @@ func (engine *Engine) Download(ctx context.Context, download model.Download) err
 			return err
 		}
 		resolving = true
+		download.Status = model.StatusResolving
 	case model.StatusDownloading:
 	case model.StatusResolving,
 		model.StatusPaused,
@@ -145,6 +146,11 @@ func (engine *Engine) Download(ctx context.Context, download model.Download) err
 		model.StatusFailed,
 		model.StatusCanceled:
 		return fmt.Errorf("download %s cannot start from status %s", download.ID, download.Status)
+	}
+	if recovered, err := engine.recoverPendingFinalization(ctx, download); err != nil {
+		return engine.failFinalization(ctx, download.ID, err)
+	} else if recovered {
+		return nil
 	}
 	metadata, err := NewInspector(engine.httpClient).Inspect(ctx, download.URL)
 	if err != nil {
@@ -288,14 +294,14 @@ func (engine *Engine) Download(ctx context.Context, download model.Download) err
 	}
 	finalPath, err = engine.finalize(download, finalPath, partial)
 	if err != nil {
-		return err
+		return engine.failFinalization(ctx, download.ID, err)
 	}
 	if err := partial.Close(); err != nil {
 		partialOpen = false
 		return engine.fail(ctx, download.ID, fmt.Errorf("close finalized partial file: %w", err))
 	}
 	partialOpen = false
-	return engine.completeCurrentFinalization(ctx, download, finalPath)
+	return engine.failFinalization(ctx, download.ID, engine.completeCurrentFinalization(ctx, download, finalPath))
 }
 
 func (engine *Engine) preparePaths(download model.Download) (int64, string, error) {

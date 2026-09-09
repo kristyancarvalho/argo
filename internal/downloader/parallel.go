@@ -119,14 +119,14 @@ func (engine *Engine) downloadParallel(
 	}
 	finalPath, err = engine.finalize(download, finalPath, partial)
 	if err != nil {
-		return err
+		return engine.failFinalization(ctx, download.ID, err)
 	}
 	if err := partial.Close(); err != nil {
 		partialOpen = false
 		return engine.fail(ctx, download.ID, fmt.Errorf("close finalized parallel partial file: %w", err))
 	}
 	partialOpen = false
-	return engine.completeCurrentFinalization(ctx, download, finalPath)
+	return engine.failFinalization(ctx, download.ID, engine.completeCurrentFinalization(ctx, download, finalPath))
 }
 
 func (engine *Engine) downloadChunk(
