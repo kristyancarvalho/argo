@@ -499,6 +499,9 @@ func (service *Service) pause(ctx context.Context, payload json.RawMessage) (ipc
 		return ipc.DownloadActionResponse{}, err
 	}
 	if download.Status == model.StatusPaused {
+		if err := service.waitActive(ctx, identifier); err != nil {
+			return ipc.DownloadActionResponse{}, err
+		}
 		service.forgetMeteredPause(download.ID)
 		return actionResponse(download.ID, model.StatusPaused), nil
 	}
@@ -524,6 +527,9 @@ func (service *Service) pause(ctx context.Context, payload json.RawMessage) (ipc
 	}
 
 	service.cancelActive(identifier)
+	if err := service.waitActive(ctx, identifier); err != nil {
+		return ipc.DownloadActionResponse{}, err
+	}
 	service.forgetMeteredPause(identifier)
 	_ = service.reconcileTrafficPolicy(context.WithoutCancel(ctx))
 
