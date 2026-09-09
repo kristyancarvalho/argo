@@ -414,11 +414,17 @@ func parseContentRange(value string) (int64, int64, int64, error) {
 func (engine *Engine) copy(
 	ctx context.Context,
 	id model.DownloadID,
-	destination io.Writer,
+	destination *os.File,
 	source io.Reader,
 	downloaded int64,
 	limiter *rateLimiter,
-) (int64, error) {
+) (total int64, result error) {
+	checkpoint := progressCheckpoint{bytes: downloaded}
+	defer func() {
+		flushContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), progressFlushTimeout)
+		defer cancel()
+		result = errors.Join(result, engine.persistProgress(flushContext, id, destination, &checkpoint, downloaded, true))
+	}()
 	buffer := make([]byte, copyBufferSize)
 	for {
 		if err := ctx.Err(); err != nil {
@@ -437,7 +443,7 @@ func (engine *Engine) copy(
 			if written != read {
 				return downloaded, io.ErrShortWrite
 			}
-			if err := engine.store.UpdateDownloadProgress(ctx, id, downloaded, engine.now()); err != nil {
+			if err := engine.persistProgress(ctx, id, destination, &checkpoint, downloaded, false); err != nil {
 				return downloaded, err
 			}
 		}

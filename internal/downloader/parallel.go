@@ -22,11 +22,13 @@ type ChunkProgress struct {
 }
 
 type progressTracker struct {
-	mutex      sync.Mutex
-	total      int64
-	byChunk    []int64
-	downloadID model.DownloadID
-	engine     *Engine
+	mutex       sync.Mutex
+	total       int64
+	byChunk     []int64
+	downloadID  model.DownloadID
+	engine      *Engine
+	file        *os.File
+	checkpoints []progressCheckpoint
 }
 
 func (engine *Engine) downloadParallel(
@@ -80,7 +82,7 @@ func (engine *Engine) downloadParallel(
 	}
 	results := make(chan error, pending)
 	limiter := newRateLimiter(engine.rateLimit.Load)
-	tracker := newProgressTracker(engine, download.ID, states)
+	tracker := newProgressTracker(engine, download.ID, states, partial)
 	for _, chunk := range chunks {
 		downloaded := states[chunk.Index].DownloadedBytes
 		if downloaded == chunk.Size() {
@@ -108,6 +110,11 @@ func (engine *Engine) downloadParallel(
 			cancelWorkers()
 		}
 	}
+	flushContext, cancelFlush := context.WithTimeout(context.WithoutCancel(ctx), progressFlushTimeout)
+	if err := tracker.Flush(flushContext); err != nil {
+		workerErrors = append(workerErrors, err)
+	}
+	cancelFlush()
 	if len(workerErrors) > 0 {
 		return engine.fail(ctx, download.ID, errors.Join(workerErrors...))
 	}
@@ -204,15 +211,18 @@ func (engine *Engine) downloadChunk(
 	}
 }
 
-func newProgressTracker(engine *Engine, downloadID model.DownloadID, chunks []model.DownloadChunk) *progressTracker {
+func newProgressTracker(engine *Engine, downloadID model.DownloadID, chunks []model.DownloadChunk, file *os.File) *progressTracker {
 	tracker := &progressTracker{
-		byChunk:    make([]int64, len(chunks)),
-		downloadID: downloadID,
-		engine:     engine,
+		byChunk:     make([]int64, len(chunks)),
+		downloadID:  downloadID,
+		engine:      engine,
+		file:        file,
+		checkpoints: make([]progressCheckpoint, len(chunks)),
 	}
 	for _, chunk := range chunks {
 		tracker.byChunk[chunk.Index] = chunk.DownloadedBytes
 		tracker.total += chunk.DownloadedBytes
+		tracker.checkpoints[chunk.Index].bytes = chunk.DownloadedBytes
 	}
 
 	return tracker
@@ -223,13 +233,7 @@ func (tracker *progressTracker) Add(ctx context.Context, chunk Chunk, byteCount 
 	defer tracker.mutex.Unlock()
 	tracker.total += byteCount
 	tracker.byChunk[chunk.Index] += byteCount
-	if err := tracker.engine.store.UpdateChunkProgress(
-		ctx,
-		tracker.downloadID,
-		chunk.Index,
-		tracker.byChunk[chunk.Index],
-		tracker.engine.now(),
-	); err != nil {
+	if err := tracker.persistChunk(ctx, chunk.Index, false); err != nil {
 		return err
 	}
 	if tracker.engine.observer != nil {

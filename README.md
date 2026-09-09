@@ -296,6 +296,14 @@ Useful focused targets are `make format-check`, `make vet`, `make lint`, `make t
 
 The isolated kernel QoS tests are capability-gated and skip when the required namespace and traffic-control facilities are unavailable. They never require changing the developer's ordinary host network configuration.
 
+For a repeatable 64 MiB local HTTP transfer benchmark with checksum verification and a real SQLite database:
+
+```sh
+go test ./tests/integration -run '^$' -bench BenchmarkDownloadCheckpointThroughput -benchtime=1x -count=5 -benchmem
+```
+
+The benchmark reports one- and four-chunk transfers, including durable finalization. Keep the temporary filesystem and machine load consistent when comparing results; tmpfs is not representative of persistent storage. Progress is checkpointed frequently during startup, then after roughly 1 MiB per stream/chunk or one second of incoming progress. Checkpoints sync partial data before persisting offsets. Clean pause and worker termination flush remaining progress; abrupt termination may replay the last uncheckpointed bytes.
+
 ## Repository structure
 
 | Path | Purpose |
