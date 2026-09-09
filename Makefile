@@ -3,22 +3,24 @@ GOFMT ?= gofmt
 GOLANGCI_LINT ?= golangci-lint
 BIN_DIR ?= bin
 RUN_ARGS ?=
+GO_SOURCE_DIRS := cmd internal tests
+GO_PACKAGES := ./cmd/... ./internal/... ./tests/...
 
 .PHONY: all build check ci format format-check lint run test test-e2e test-integration test-race test-unit vet
 
 all: check
 
 format:
-	$(GOFMT) -w $$(find . -name '*.go' -type f)
+	$(GOFMT) -w $(GO_SOURCE_DIRS)
 
 format-check:
-	test -z "$$($(GOFMT) -l .)"
+	unformatted="$$($(GOFMT) -l $(GO_SOURCE_DIRS))" && test -z "$$unformatted"
 
 vet:
-	$(GO) vet ./...
+	$(GO) vet $(GO_PACKAGES)
 
 lint:
-	$(GOLANGCI_LINT) run
+	$(GOLANGCI_LINT) run $(GO_PACKAGES)
 
 test-unit:
 	$(GO) test ./tests/unit/...
@@ -32,7 +34,7 @@ test-e2e:
 test: test-unit test-integration test-e2e
 
 test-race:
-	$(GO) test -race ./...
+	$(GO) test -race $(GO_PACKAGES)
 
 build:
 	mkdir -p $(BIN_DIR)

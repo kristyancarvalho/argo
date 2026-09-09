@@ -58,7 +58,7 @@ func TestDedicatedTestsWorkflowRunsRequiredSuites(t *testing.T) {
 		"go test ./tests/unit/...",
 		"go test ./tests/integration/...",
 		"go test ./tests/e2e/...",
-		"go test -race ./...",
+		"go test -race ./cmd/... ./internal/... ./tests/...",
 	} {
 		if !strings.Contains(workflow, expected) {
 			t.Errorf("tests workflow does not contain %q", expected)
@@ -83,7 +83,7 @@ func TestCIAndTestsWorkflowsHaveDistinctResponsibilities(t *testing.T) {
 
 	ci := string(ciContent)
 	tests := string(testsContent)
-	for _, expected := range []string{"gofmt -l", "go vet ./...", "golangci/golangci-lint-action", "go build ./cmd/argo ./cmd/argod ./cmd/argo-qosd"} {
+	for _, expected := range []string{"make format-check", "go vet ./cmd/... ./internal/... ./tests/...", "golangci/golangci-lint-action", "args: ./cmd/... ./internal/... ./tests/...", "go build ./cmd/argo ./cmd/argod ./cmd/argo-qosd"} {
 		if !strings.Contains(ci, expected) {
 			t.Errorf("CI workflow does not contain %q", expected)
 		}
