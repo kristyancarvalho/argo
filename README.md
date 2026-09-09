@@ -294,6 +294,8 @@ make check
 
 Useful focused targets are `make format-check`, `make vet`, `make lint`, `make test-unit`, `make test-integration`, `make test-e2e`, `make test-race`, and `make build`. The general CI workflow executes formatting, vet, golangci-lint, and builds for every executable. The dedicated Tests workflow executes all three test layers and the race detector.
 
+Go checks cover `cmd/`, `internal/`, and `tests/`, including new package files, without traversing website dependencies or ignored development experiments.
+
 The isolated kernel QoS tests are capability-gated and skip when the required namespace and traffic-control facilities are unavailable. They never require changing the developer's ordinary host network configuration.
 
 For a repeatable 64 MiB local HTTP transfer benchmark with checksum verification and a real SQLite database:
