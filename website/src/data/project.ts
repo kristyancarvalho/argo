@@ -8,7 +8,7 @@ export const project = {
   language: "Go",
   stage: "Pre-1.0",
   status: "Early development",
-  version: "v0.8.0",
+  version: "v0.8.1",
   themeColor: "#071a33",
   socialImage: "/branding/banner/argo-social-preview.png",
 } as const;
