@@ -495,6 +495,9 @@ func (model Model) renderSelected(view *strings.Builder, width int) {
 	_, _ = fmt.Fprintf(view, "  ID: %s\n  State: %s    Priority: %s\n", diagnostic.Display(download.ID), diagnostic.Display(download.Status), diagnostic.Display(download.Priority))
 	_, _ = fmt.Fprintf(view, "  File: %s\n", truncateCells(diagnostic.Display(download.Filename), max(4, width-8)))
 	_, _ = fmt.Fprintf(view, "  Source: %s\n", truncateCells(diagnostic.Display(diagnostic.URL(download.URL)), max(4, width-10)))
+	if download.Checksum != "" {
+		_, _ = fmt.Fprintf(view, "  Checksum: %s\n", truncateCells(diagnostic.Display(download.Checksum), max(4, width-12)))
+	}
 }
 
 func (model Model) renderHelp(view *strings.Builder) {
@@ -926,6 +929,8 @@ func statusColor(status string) console.Code {
 		return console.Cyan
 	case "downloading":
 		return console.Blue
+	case "verifying":
+		return console.Magenta
 	case "paused":
 		return console.Yellow
 	case "failed", "canceled":

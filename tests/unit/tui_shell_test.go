@@ -652,7 +652,7 @@ func assertTUIViewBounds(t *testing.T, view string, width, height int) {
 }
 
 func TestTUIStatesRemainDistinctWithoutColor(t *testing.T) {
-	states := []string{"downloading", "paused", "completed", "failed", "canceled"}
+	states := []string{"downloading", "verifying", "paused", "completed", "failed", "canceled"}
 	downloads := make([]ipc.Download, len(states))
 	for index, state := range states {
 		downloads[index] = ipc.Download{ID: state, Filename: state + ".bin", Status: state, Priority: "normal"}

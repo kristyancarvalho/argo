@@ -61,7 +61,7 @@ func (service *Service) reconcileTrafficPolicy(ctx context.Context) (resultErr e
 	active := 0
 	for _, download := range downloads {
 		switch download.Status {
-		case model.StatusQueued, model.StatusResolving, model.StatusDownloading:
+		case model.StatusQueued, model.StatusResolving, model.StatusDownloading, model.StatusVerifying:
 			active++
 		case model.StatusPaused, model.StatusCompleted, model.StatusFailed, model.StatusCanceled:
 		}

@@ -3,6 +3,8 @@ package e2e_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -112,12 +114,16 @@ func TestCLIBasicDownloadFlow(t *testing.T) {
 		t.Fatalf("unknown profile returned %v: %q", err, unknownOutput)
 	}
 
+	digest := sha256.Sum256(payload)
+	checksum := "sha256:" + hex.EncodeToString(digest[:])
 	addOutput, err := executeCLI(
 		ctx,
 		argoBinary,
 		invocationDirectory,
 		environment,
 		"add",
+		"--checksum",
+		checksum,
 		httpServer.URL+"/cli.bin",
 	)
 	if err != nil {
@@ -168,6 +174,10 @@ func TestCLIBasicDownloadFlow(t *testing.T) {
 	}
 	if !strings.Contains(listOutput, identifier) || !strings.Contains(listOutput, "completed") {
 		t.Fatalf("unexpected list output %q", listOutput)
+	}
+	verifyOutput, err := executeCLI(ctx, argoBinary, invocationDirectory, environment, "verify", identifier)
+	if err != nil || !strings.Contains(verifyOutput, "Verified "+identifier) || !strings.Contains(verifyOutput, checksum) {
+		t.Fatalf("unexpected verify result %v: %q", err, verifyOutput)
 	}
 	watchOutput, err := executeCLI(ctx, argoBinary, invocationDirectory, environment, "watch")
 	if err != nil {
