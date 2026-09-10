@@ -26,6 +26,16 @@ make test-race
 
 Capability-gated QoS tests use isolated network namespaces when the required Linux facilities are available. They skip rather than mutate ordinary host network configuration when the environment cannot provide safe isolation.
 
+Go checks target `cmd/`, `internal/`, and `tests/`, including newly added package files. They do not traverse website dependencies or ignored development experiments.
+
+For a checksum-verified local 64 MiB transfer benchmark with real SQLite and durable finalization:
+
+```sh
+go test ./tests/integration -run '^$' -bench BenchmarkDownloadCheckpointThroughput -benchtime=1x -count=5 -benchmem
+```
+
+Compare repeated runs on the same temporary filesystem and under similar machine load. A tmpfs result is not a persistent-disk benchmark, and loopback throughput is not a WAN prediction.
+
 ## Repository layout
 
 | Path                 | Purpose                                                    |

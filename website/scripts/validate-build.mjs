@@ -24,6 +24,7 @@ const required = [
   "docs/architecture/index.html",
   "changelog/index.html",
   "changelog/v0.8.0/index.html",
+  "changelog/v0.8.1/index.html",
   "branding/logo/argo-logo-horizontal.svg",
   "branding/banner/argo-social-preview.png",
 ];

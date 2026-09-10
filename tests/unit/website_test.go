@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -328,6 +329,33 @@ func TestWebsiteChangelogCoversPublishedGitTags(t *testing.T) {
 		if !entries[version] {
 			t.Errorf("published tag %s has no changelog entry", version)
 		}
+	}
+}
+
+func TestWebsiteSelectedReleaseHasChangelog(t *testing.T) {
+	root := repositoryRoot(t)
+	metadata, err := os.ReadFile(filepath.Join(root, "website", "src", "data", "project.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	match := regexp.MustCompile(`version:\s*"(v[0-9]+\.[0-9]+\.[0-9]+)"`).FindSubmatch(metadata)
+	if len(match) != 2 {
+		t.Fatal("website release metadata is missing or invalid")
+	}
+	version := string(match[1])
+	content, err := os.ReadFile(filepath.Join(root, "website", "src", "content", "changelog", version+".md"))
+	if err != nil || !strings.Contains(string(content), "version: "+version+"\n") {
+		t.Fatalf("selected release %s has no matching changelog: %v", version, err)
+	}
+}
+
+func TestReleaseNotesWrapLongIdentifiers(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join(repositoryRoot(t), "website", "src", "layouts", "ReleaseLayout.astro"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(content), "overflow-wrap: anywhere;") {
+		t.Fatal("release notes must wrap long benchmark and command identifiers on mobile")
 	}
 }
 

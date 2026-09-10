@@ -267,7 +267,7 @@ Use `argo status` for the current policy and any helper error. On a configured h
 
 ## Project status
 
-Argo is functional early-stage software in the pre-1.0 v0.7.x development line. The daemon, transfer lifecycle, persistence, terminal interfaces, and optional RX QoS path are implemented and covered by unit, integration, end-to-end, race, and isolated kernel tests. The compatibility surface is not yet declared stable, and users should review release notes before upgrading.
+Argo is functional early-stage software in the pre-1.0 v0.8.x development line. The daemon, transfer lifecycle, persistence, terminal interfaces, and optional RX QoS path are implemented and covered by unit, integration, end-to-end, race, and isolated kernel tests. The compatibility surface is not yet declared stable, and users should review release notes before upgrading.
 
 Published versions and their validated changes are listed on the [GitHub Releases page](https://github.com/kristyancarvalho/argo/releases). Active work is tracked through [issues](https://github.com/kristyancarvalho/argo/issues) and [milestones](https://github.com/kristyancarvalho/argo/milestones); availability is based on merged code, not roadmap intent.
 
