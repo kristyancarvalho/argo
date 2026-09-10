@@ -22,12 +22,13 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Verify formatting
-        run: test -z "$(gofmt -l .)"
+        run: make format-check
       - name: Vet
-        run: go vet ./...
+        run: go vet ./cmd/... ./internal/... ./tests/...
       - name: Lint
         uses: golangci/golangci-lint-action@4afd733a84b1f43292c63897423277bb7f4313a9 # v8
         with:
           version: v2.13.2
+          args: ./cmd/... ./internal/... ./tests/...
       - name: Build executables
         run: go build ./cmd/argo ./cmd/argod ./cmd/argo-qosd

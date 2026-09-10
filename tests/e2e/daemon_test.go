@@ -33,7 +33,7 @@ func TestDaemonExecutableLifecycle(t *testing.T) {
 		t.Fatalf("build argo: %v: %s", err, output)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, binary)
 	environment := append(
@@ -90,6 +90,7 @@ func TestDaemonExecutableLifecycle(t *testing.T) {
 	if !strings.Contains(tuiOutput.String(), "\x1b[?1049l") {
 		t.Fatalf("TUI did not restore the terminal after modal Ctrl+C: %q", tuiOutput.String())
 	}
+	assertTUISignalExits(t, ctx, clientBinary, environment)
 	status, err := client.Status(ctx)
 	if err != nil || status.State != "running" {
 		t.Fatalf("daemon stopped after TUI exit: status=%+v error=%v", status, err)

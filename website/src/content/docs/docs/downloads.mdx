@@ -32,6 +32,12 @@ A canceled download can resume only when valid partial state still exists and th
 
 Active downloads cannot be silently removed. Completed files are never deleted by `remove` or `clear`.
 
+## Progress and recovery
+
+Argo records progress frequently during startup, then checkpoints after roughly 1 MiB per stream/chunk or one second of incoming progress. Partial data is synced before offsets are committed. A clean pause waits for the remaining checkpoint; abrupt daemon termination may require downloading the last uncheckpointed bytes again.
+
+A failed final placement retains recovery information rather than claiming completion. After repairing the destination problem, resume can finish publication without duplicating an already-published file. A restart also recovers pending finalization journals.
+
 ## Scheduler priority
 
 ```sh

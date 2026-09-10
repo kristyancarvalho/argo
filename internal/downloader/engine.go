@@ -138,6 +138,7 @@ func (engine *Engine) Download(ctx context.Context, download model.Download) err
 			return err
 		}
 		resolving = true
+		download.Status = model.StatusResolving
 	case model.StatusDownloading:
 	case model.StatusResolving,
 		model.StatusPaused,
@@ -145,6 +146,11 @@ func (engine *Engine) Download(ctx context.Context, download model.Download) err
 		model.StatusFailed,
 		model.StatusCanceled:
 		return fmt.Errorf("download %s cannot start from status %s", download.ID, download.Status)
+	}
+	if recovered, err := engine.recoverPendingFinalization(ctx, download); err != nil {
+		return engine.failFinalization(ctx, download.ID, err)
+	} else if recovered {
+		return nil
 	}
 	metadata, err := NewInspector(engine.httpClient).Inspect(ctx, download.URL)
 	if err != nil {
@@ -174,6 +180,16 @@ func (engine *Engine) Download(ctx context.Context, download model.Download) err
 		}
 	}
 
+	states, err := engine.store.DownloadChunks(ctx, download.ID)
+	if err != nil {
+		return engine.fail(ctx, download.ID, err)
+	}
+	if len(states) > 0 {
+		if err := engine.store.ResetDownloadProgress(ctx, download.ID, engine.now()); err != nil {
+			return engine.fail(ctx, download.ID, err)
+		}
+		download.DownloadedBytes = 0
+	}
 	offset, finalPath, err := engine.preparePaths(download)
 	if err != nil {
 		return engine.fail(ctx, download.ID, err)
@@ -278,14 +294,14 @@ func (engine *Engine) Download(ctx context.Context, download model.Download) err
 	}
 	finalPath, err = engine.finalize(download, finalPath, partial)
 	if err != nil {
-		return err
+		return engine.failFinalization(ctx, download.ID, err)
 	}
 	if err := partial.Close(); err != nil {
 		partialOpen = false
 		return engine.fail(ctx, download.ID, fmt.Errorf("close finalized partial file: %w", err))
 	}
 	partialOpen = false
-	return engine.completeCurrentFinalization(ctx, download, finalPath)
+	return engine.failFinalization(ctx, download.ID, engine.completeCurrentFinalization(ctx, download, finalPath))
 }
 
 func (engine *Engine) preparePaths(download model.Download) (int64, string, error) {
@@ -398,11 +414,17 @@ func parseContentRange(value string) (int64, int64, int64, error) {
 func (engine *Engine) copy(
 	ctx context.Context,
 	id model.DownloadID,
-	destination io.Writer,
+	destination *os.File,
 	source io.Reader,
 	downloaded int64,
 	limiter *rateLimiter,
-) (int64, error) {
+) (total int64, result error) {
+	checkpoint := progressCheckpoint{bytes: downloaded}
+	defer func() {
+		flushContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), progressFlushTimeout)
+		defer cancel()
+		result = errors.Join(result, engine.persistProgress(flushContext, id, destination, &checkpoint, downloaded, true))
+	}()
 	buffer := make([]byte, copyBufferSize)
 	for {
 		if err := ctx.Err(); err != nil {
@@ -421,7 +443,7 @@ func (engine *Engine) copy(
 			if written != read {
 				return downloaded, io.ErrShortWrite
 			}
-			if err := engine.store.UpdateDownloadProgress(ctx, id, downloaded, engine.now()); err != nil {
+			if err := engine.persistProgress(ctx, id, destination, &checkpoint, downloaded, false); err != nil {
 				return downloaded, err
 			}
 		}

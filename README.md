@@ -267,7 +267,7 @@ Use `argo status` for the current policy and any helper error. On a configured h
 
 ## Project status
 
-Argo is functional early-stage software in the pre-1.0 v0.7.x development line. The daemon, transfer lifecycle, persistence, terminal interfaces, and optional RX QoS path are implemented and covered by unit, integration, end-to-end, race, and isolated kernel tests. The compatibility surface is not yet declared stable, and users should review release notes before upgrading.
+Argo is functional early-stage software in the pre-1.0 v0.8.x development line. The daemon, transfer lifecycle, persistence, terminal interfaces, and optional RX QoS path are implemented and covered by unit, integration, end-to-end, race, and isolated kernel tests. The compatibility surface is not yet declared stable, and users should review release notes before upgrading.
 
 Published versions and their validated changes are listed on the [GitHub Releases page](https://github.com/kristyancarvalho/argo/releases). Active work is tracked through [issues](https://github.com/kristyancarvalho/argo/issues) and [milestones](https://github.com/kristyancarvalho/argo/milestones); availability is based on merged code, not roadmap intent.
 
@@ -294,7 +294,17 @@ make check
 
 Useful focused targets are `make format-check`, `make vet`, `make lint`, `make test-unit`, `make test-integration`, `make test-e2e`, `make test-race`, and `make build`. The general CI workflow executes formatting, vet, golangci-lint, and builds for every executable. The dedicated Tests workflow executes all three test layers and the race detector.
 
+Go checks cover `cmd/`, `internal/`, and `tests/`, including new package files, without traversing website dependencies or ignored development experiments.
+
 The isolated kernel QoS tests are capability-gated and skip when the required namespace and traffic-control facilities are unavailable. They never require changing the developer's ordinary host network configuration.
+
+For a repeatable 64 MiB local HTTP transfer benchmark with checksum verification and a real SQLite database:
+
+```sh
+go test ./tests/integration -run '^$' -bench BenchmarkDownloadCheckpointThroughput -benchtime=1x -count=5 -benchmem
+```
+
+The benchmark reports one- and four-chunk transfers, including durable finalization. Keep the temporary filesystem and machine load consistent when comparing results; tmpfs is not representative of persistent storage. Progress is checkpointed frequently during startup, then after roughly 1 MiB per stream/chunk or one second of incoming progress. Checkpoints sync partial data before persisting offsets. Clean pause and worker termination flush remaining progress; abrupt termination may replay the last uncheckpointed bytes.
 
 ## Repository structure
 
@@ -312,7 +322,7 @@ The isolated kernel QoS tests are capability-gated and skip when the required na
 
 ## Brand assets
 
-The canonical blue logo sources, banners, widgets, previews, and PNG exports live in [`assets/branding/`](assets/branding/). Run `./assets/branding/export.sh` to regenerate raster assets when `rsvg-convert` is installed.
+The canonical blue logo sources, banners, widgets, previews, and PNG exports live in [`assets/branding/`](assets/branding/). Run `./assets/branding/export.sh` to regenerate raster assets when `rsvg-convert` is installed. To change banner copy, edit and run `node assets/branding/banner/generate.mjs` with Pango and DejaVu Serif installed, then regenerate the PNGs. The committed SVGs contain outlined text and need no installed fonts to display.
 
 ## License
 

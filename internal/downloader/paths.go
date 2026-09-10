@@ -263,10 +263,6 @@ func (engine *Engine) stageAndPublish(download model.Download, stateDirectory *o
 	staging := filepath.Join(download.Destination, record.Staging)
 	candidate := filepath.Join(download.Destination, record.Candidate)
 	if err := engine.linkOrCopyStaging(partial, staging); err != nil {
-		var interrupted finalizationInterruptedError
-		if !errors.As(err, &interrupted) {
-			_ = engine.removeFinalizationArtifacts(download, stateDirectory, record, false)
-		}
 		return "", fmt.Errorf("stage finalized download: %w", err)
 	}
 	record.Ready = true
@@ -378,45 +374,61 @@ func (engine *Engine) writeFinalizationRecord(directory *os.File, identifier mod
 
 func (engine *Engine) RecoverFinalizations(ctx context.Context, downloads []model.Download) error {
 	for _, download := range downloads {
-		record, exists, err := engine.readFinalizationRecord(download.ID)
-		if err != nil {
-			return err
-		}
-		if !exists {
-			continue
-		}
-		if err := validateFinalizationRecord(download, record); err != nil {
-			return err
-		}
-		if download.Status == model.StatusCompleted {
-			if err := engine.cleanupFinalization(download, record); err != nil {
-				return err
-			}
-			continue
-		}
-		if download.Status != model.StatusDownloading {
-			continue
-		}
-		finalPath, err := engine.recoverFinalization(download, record)
-		if err != nil {
-			return err
-		}
-		current, exists, err := engine.readFinalizationRecord(download.ID)
-		if err != nil {
-			return err
-		}
-		if !exists {
-			return fmt.Errorf("recovered finalization record for download %s is missing", download.ID)
-		}
-		if err := validateFinalizationRecord(download, current); err != nil {
-			return err
-		}
-		if err := engine.completeFinalization(ctx, download, finalPath, current); err != nil {
-			return err
+		if _, err := engine.recoverPendingFinalization(ctx, download); err != nil {
+			return engine.failFinalization(ctx, download.ID, err)
 		}
 	}
 
 	return nil
+}
+
+func (engine *Engine) recoverPendingFinalization(ctx context.Context, download model.Download) (bool, error) {
+	record, exists, err := engine.readFinalizationRecord(download.ID)
+	if err != nil || !exists {
+		return false, err
+	}
+	if err := validateFinalizationRecord(download, record); err != nil {
+		return false, err
+	}
+	switch download.Status {
+	case model.StatusCompleted:
+		return true, engine.cleanupFinalization(download, record)
+	case model.StatusFailed:
+		if err := engine.store.UpdateDownloadStatus(ctx, download.ID, model.StatusQueued, engine.now(), ""); err != nil {
+			return false, err
+		}
+	case model.StatusQueued, model.StatusResolving, model.StatusDownloading:
+	case model.StatusPaused, model.StatusCanceled:
+		return false, nil
+	}
+	if download.Status != model.StatusDownloading {
+		if err := engine.store.UpdateDownloadStatus(ctx, download.ID, model.StatusDownloading, engine.now(), ""); err != nil {
+			return false, err
+		}
+	}
+	finalPath, err := engine.recoverFinalization(download, record)
+	if err != nil {
+		return false, err
+	}
+	current, exists, err := engine.readFinalizationRecord(download.ID)
+	if err != nil {
+		return false, err
+	}
+	if !exists {
+		return false, fmt.Errorf("recovered finalization record for download %s is missing", download.ID)
+	}
+	if err := validateFinalizationRecord(download, current); err != nil {
+		return false, err
+	}
+	return true, engine.completeFinalization(ctx, download, finalPath, current)
+}
+
+func (engine *Engine) failFinalization(ctx context.Context, identifier model.DownloadID, err error) error {
+	var interrupted finalizationInterruptedError
+	if err == nil || errors.As(err, &interrupted) {
+		return err
+	}
+	return engine.fail(ctx, identifier, err)
 }
 
 func (engine *Engine) readFinalizationRecord(identifier model.DownloadID) (finalizationRecord, bool, error) {
