@@ -48,7 +48,7 @@ func styleCommandOutput(value string) string {
 		}
 		for token, code := range map[string]console.Code{
 			"active": console.Green, "running": console.Green, "completed": console.Green,
-			"queued": console.Cyan, "downloading": console.Blue, "paused": console.Yellow,
+			"queued": console.Cyan, "downloading": console.Blue, "verifying": console.Magenta, "paused": console.Yellow,
 			"inactive": console.Yellow, "failed": console.Red, "canceled": console.Red,
 			"high": console.Magenta, "normal": console.Cyan, "low": console.Dim,
 		} {

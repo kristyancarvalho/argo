@@ -13,6 +13,7 @@ import (
 
 type Client interface {
 	Add(context.Context, string, string) (ipc.AddResponse, error)
+	AddWithChecksum(context.Context, string, string, string) (ipc.AddResponse, error)
 	List(context.Context) ([]ipc.Download, error)
 	Show(context.Context, string) (ipc.Download, error)
 	Pause(context.Context, string) (ipc.DownloadActionResponse, error)
@@ -21,6 +22,7 @@ type Client interface {
 	Remove(context.Context, string) (ipc.DownloadActionResponse, error)
 	Clear(context.Context) (ipc.ClearResponse, error)
 	Retry(context.Context, string) (ipc.AddResponse, error)
+	Verify(context.Context, string) (ipc.VerifyResponse, error)
 	Priority(context.Context, string, string) (ipc.PriorityResponse, error)
 	Status(context.Context) (ipc.Status, error)
 	Profile(context.Context, string) (ipc.ProfileResponse, error)
@@ -63,6 +65,8 @@ func RunWithOptions(ctx context.Context, client Client, output io.Writer, argume
 		return runClear(ctx, client, output, operands)
 	case "retry":
 		return runRetry(ctx, client, output, operands)
+	case "verify":
+		return runVerify(ctx, client, output, operands)
 	case "priority":
 		return runPriority(ctx, client, output, operands)
 	case "watch":
@@ -88,7 +92,8 @@ Usage:
   argo <command> [arguments]
 
 Commands:
-  add <url>                         Add a download
+  add [--checksum sha256:<hex>] <url>
+                                    Add a download
   list                              List downloads
   show <id>                         Show download details
   pause <id>                        Pause a download
@@ -97,6 +102,7 @@ Commands:
   remove <id>                       Remove a historical download
   clear                             Clear completed, failed, and canceled history
   retry <id>                        Start a new transfer from historical source
+  verify <id>                       Verify a completed download
   priority <id> <low|normal|high>   Order queued Argo downloads
   watch                             Stream download progress
   status                            Show daemon, network, and QoS state
@@ -169,14 +175,48 @@ func runProfile(ctx context.Context, client Client, output io.Writer, arguments 
 }
 
 func runAdd(ctx context.Context, client Client, output io.Writer, arguments []string) error {
-	if len(arguments) != 1 {
-		return UsageError{Message: "argo add <url>"}
+	rawURL := ""
+	checksum := ""
+	for index := 0; index < len(arguments); index++ {
+		if arguments[index] == "--checksum" {
+			if checksum != "" || index+1 >= len(arguments) {
+				return UsageError{Message: "argo add [--checksum sha256:<hex>] <url>"}
+			}
+			checksum = arguments[index+1]
+			index++
+			continue
+		}
+		if rawURL != "" {
+			return UsageError{Message: "argo add [--checksum sha256:<hex>] <url>"}
+		}
+		rawURL = arguments[index]
 	}
-	response, err := client.Add(ctx, arguments[0], "")
+	if rawURL == "" {
+		return UsageError{Message: "argo add [--checksum sha256:<hex>] <url>"}
+	}
+	response, err := client.AddWithChecksum(ctx, rawURL, "", checksum)
 	if err != nil {
 		return err
 	}
 	_, err = fmt.Fprintf(output, "Added %s %s (%s)\n", diagnostic.Display(response.ID), diagnostic.Display(response.Filename), diagnostic.Display(response.Status))
+
+	return err
+}
+
+func runVerify(ctx context.Context, client Client, output io.Writer, arguments []string) error {
+	if len(arguments) != 1 {
+		return UsageError{Message: "argo verify <id>"}
+	}
+	response, err := client.Verify(ctx, arguments[0])
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(
+		output,
+		"Verified %s (%s)\n",
+		diagnostic.Display(response.ID),
+		diagnostic.Display(response.Checksum),
+	)
 
 	return err
 }
@@ -245,7 +285,7 @@ func runShow(ctx context.Context, client Client, output io.Writer, arguments []s
 	}
 	_, err = fmt.Fprintf(
 		output,
-		"ID: %s\nFilename: %s\nURL: %s\nDestination: %s\nStatus: %s\nPriority: %s\nProgress: %s\nError: %s\n",
+		"ID: %s\nFilename: %s\nURL: %s\nDestination: %s\nStatus: %s\nPriority: %s\nProgress: %s\nChecksum: %s\nError: %s\n",
 		diagnostic.Display(download.ID),
 		diagnostic.Display(download.Filename),
 		diagnostic.Display(diagnostic.URL(download.URL)),
@@ -253,6 +293,7 @@ func runShow(ctx context.Context, client Client, output io.Writer, arguments []s
 		diagnostic.Display(download.Status),
 		diagnostic.Display(download.Priority),
 		formatProgress(download),
+		statusValue(download.Checksum),
 		diagnostic.Display(diagnostic.Text(download.Error)),
 	)
 

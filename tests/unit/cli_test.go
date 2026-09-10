@@ -29,6 +29,10 @@ func (client *unsafeTerminalClient) Add(context.Context, string, string) (ipc.Ad
 	return ipc.AddResponse{ID: "id", Filename: unsafeTerminalName, Status: "queued"}, nil
 }
 
+func (client *unsafeTerminalClient) AddWithChecksum(context.Context, string, string, string) (ipc.AddResponse, error) {
+	return ipc.AddResponse{ID: "id", Filename: unsafeTerminalName, Status: "queued"}, nil
+}
+
 func (client *unsafeTerminalClient) List(context.Context) ([]ipc.Download, error) {
 	return []ipc.Download{{ID: "id", Filename: unsafeTerminalName, Status: "queued", TotalSize: -1}}, nil
 }
@@ -64,6 +68,14 @@ func assertTerminalSafeOutput(t *testing.T, output string) {
 
 func (client *cliClient) Add(_ context.Context, rawURL, _ string) (ipc.AddResponse, error) {
 	client.called = "add:" + rawURL
+	return ipc.AddResponse{ID: "download-id", Filename: "file.bin", Status: "queued"}, nil
+}
+
+func (client *cliClient) AddWithChecksum(_ context.Context, rawURL, _, checksum string) (ipc.AddResponse, error) {
+	client.called = "add:" + rawURL
+	if checksum != "" {
+		client.called += ":" + checksum
+	}
 	return ipc.AddResponse{ID: "download-id", Filename: "file.bin", Status: "queued"}, nil
 }
 
@@ -124,6 +136,11 @@ func (client *cliClient) Clear(context.Context) (ipc.ClearResponse, error) {
 func (client *cliClient) Retry(_ context.Context, id string) (ipc.AddResponse, error) {
 	client.called = "retry:" + id
 	return ipc.AddResponse{ID: "retry-id", Filename: "file.bin", Status: "queued"}, nil
+}
+
+func (client *cliClient) Verify(_ context.Context, id string) (ipc.VerifyResponse, error) {
+	client.called = "verify:" + id
+	return ipc.VerifyResponse{ID: id, Checksum: "sha256:abcd", Matched: true}, nil
 }
 
 func (client *cliClient) Priority(_ context.Context, id, priority string) (ipc.PriorityResponse, error) {
@@ -290,6 +307,7 @@ func TestCLICommands(t *testing.T) {
 		expectedOutput string
 	}{
 		{"add", []string{"add", "https://example.test/file.bin"}, "add:https://example.test/file.bin", "Added download-id"},
+		{"add checksum", []string{"add", "--checksum", "sha256:abcd", "https://example.test/file.bin"}, "add:https://example.test/file.bin:sha256:abcd", "Added download-id"},
 		{"list", []string{"list"}, "list", "downloading"},
 		{"show", []string{"show", "download-id"}, "show:download-id", "Status: paused"},
 		{"pause", []string{"pause", "download-id"}, "pause:download-id", "download-id: paused"},
@@ -298,6 +316,7 @@ func TestCLICommands(t *testing.T) {
 		{"remove", []string{"remove", "download-id"}, "remove:download-id", "download-id: removed"},
 		{"clear", []string{"clear"}, "clear", "Removed 2 historical downloads"},
 		{"retry", []string{"retry", "download-id"}, "retry:download-id", "Added retry-id"},
+		{"verify", []string{"verify", "download-id"}, "verify:download-id", "Verified download-id"},
 		{"priority", []string{"priority", "download-id", "high"}, "priority:download-id:high", "download-id: high"},
 		{"status", []string{"status"}, "status", "Daemon: running"},
 		{"profile", []string{"profile", "gaming"}, "profile:gaming", "Active profile: gaming"},
@@ -328,6 +347,8 @@ func TestCLIRejectsInvalidArguments(t *testing.T) {
 		{"unknown"},
 		{"add"},
 		{"add", "one", "two"},
+		{"add", "--checksum"},
+		{"add", "--checksum", "one", "--checksum", "two", "url"},
 		{"list", "extra"},
 		{"show"},
 		{"pause"},
@@ -336,6 +357,8 @@ func TestCLIRejectsInvalidArguments(t *testing.T) {
 		{"remove"},
 		{"clear", "extra"},
 		{"retry"},
+		{"verify"},
+		{"verify", "one", "two"},
 		{"priority"},
 		{"priority", "download-id"},
 		{"priority", "download-id", "high", "extra"},
@@ -369,7 +392,7 @@ func TestCLIHelpAliases(t *testing.T) {
 			t.Fatalf("%s: %v", command, err)
 		}
 		for _, value := range []string{
-			"Usage:", "add <url>", "Traffic policies:",
+			"Usage:", "add [--checksum sha256:<hex>] <url>", "verify <id>", "Traffic policies:",
 			"Priorities only order queued downloads inside Argo", "privileged argo-qosd helper",
 		} {
 			if !strings.Contains(output.String(), value) {

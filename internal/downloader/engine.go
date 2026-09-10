@@ -141,6 +141,7 @@ func (engine *Engine) Download(ctx context.Context, download model.Download) err
 		download.Status = model.StatusResolving
 	case model.StatusDownloading:
 	case model.StatusResolving,
+		model.StatusVerifying,
 		model.StatusPaused,
 		model.StatusCompleted,
 		model.StatusFailed,
@@ -291,6 +292,9 @@ func (engine *Engine) Download(ctx context.Context, download model.Download) err
 	}
 	if err := partial.Sync(); err != nil {
 		return engine.fail(ctx, download.ID, fmt.Errorf("sync partial file: %w", err))
+	}
+	if err := engine.verifyPartial(ctx, download, partial); err != nil {
+		return engine.fail(ctx, download.ID, err)
 	}
 	finalPath, err = engine.finalize(download, finalPath, partial)
 	if err != nil {

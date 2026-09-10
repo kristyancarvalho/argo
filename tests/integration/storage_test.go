@@ -29,8 +29,8 @@ func TestFreshDatabaseCreation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if version != 5 {
-		t.Fatalf("schema version is %d, expected 5", version)
+	if version != 6 {
+		t.Fatalf("schema version is %d, expected 6", version)
 	}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -58,10 +58,50 @@ func TestDatabaseMigration(t *testing.T) {
 	}
 	if _, err := database.Exec(`CREATE TABLE downloads (
         id TEXT PRIMARY KEY,
-        status TEXT NOT NULL,
-        priority TEXT NOT NULL,
-        created_at TEXT NOT NULL
+        url TEXT NOT NULL,
+        destination TEXT NOT NULL,
+        filename TEXT NOT NULL,
+        total_size INTEGER NOT NULL CHECK (total_size >= -1),
+        downloaded_bytes INTEGER NOT NULL CHECK (
+            downloaded_bytes >= 0 AND
+            (total_size = -1 OR downloaded_bytes <= total_size)
+        ),
+        status TEXT NOT NULL CHECK (
+            status IN ('queued', 'resolving', 'downloading', 'paused', 'completed', 'failed', 'canceled')
+        ),
+        priority TEXT NOT NULL CHECK (priority IN ('low', 'normal', 'high')),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        started_at TEXT,
+        completed_at TEXT,
+        etag TEXT NOT NULL,
+        last_modified TEXT NOT NULL,
+        error_message TEXT NOT NULL
     )`); err != nil {
+		t.Fatal(err)
+	}
+	legacyID := "0123456789abcdef0123456789abcdef"
+	if _, err := database.Exec(`INSERT INTO downloads (
+        id, url, destination, filename, total_size, downloaded_bytes,
+        status, priority, created_at, updated_at, started_at, completed_at,
+        etag, last_modified, error_message
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		legacyID,
+		"https://example.test/legacy.bin",
+		"/tmp",
+		"legacy.bin",
+		1024,
+		256,
+		"paused",
+		"normal",
+		"2026-08-31T12:00:00Z",
+		"2026-08-31T12:01:00Z",
+		"2026-08-31T12:00:30Z",
+		nil,
+		`"legacy"`,
+		"Mon, 31 Aug 2026 12:00:00 GMT",
+		"",
+	); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.Close(); err != nil {
@@ -89,8 +129,8 @@ func TestDatabaseMigration(t *testing.T) {
 	if err := database.QueryRow("SELECT MAX(version) FROM schema_migrations").Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 5 {
-		t.Fatalf("schema version is %d, expected 5", version)
+	if version != 6 {
+		t.Fatalf("schema version is %d, expected 6", version)
 	}
 	var indexName string
 	if err := database.QueryRow(
@@ -98,6 +138,18 @@ func TestDatabaseMigration(t *testing.T) {
 		"downloads_status_priority_created_idx",
 	).Scan(&indexName); err != nil {
 		t.Fatal(err)
+	}
+	var legacyURL string
+	var legacyStatus string
+	var legacyChecksum string
+	if err := database.QueryRow(
+		"SELECT url, status, checksum FROM downloads WHERE id = ?",
+		legacyID,
+	).Scan(&legacyURL, &legacyStatus, &legacyChecksum); err != nil {
+		t.Fatal(err)
+	}
+	if legacyURL != "https://example.test/legacy.bin" || legacyStatus != "paused" || legacyChecksum != "" {
+		t.Fatalf("legacy record changed during migration: %q %q %q", legacyURL, legacyStatus, legacyChecksum)
 	}
 }
 
@@ -347,6 +399,7 @@ func assertDownloadEqual(t *testing.T, actual, expected model.Download) {
 		actual.ETag != expected.ETag ||
 		actual.LastModified != expected.LastModified ||
 		actual.RangeSupported != expected.RangeSupported ||
+		actual.Checksum != expected.Checksum ||
 		actual.Error != expected.Error {
 		t.Fatalf("downloads differ:\nactual:   %+v\nexpected: %+v", actual, expected)
 	}

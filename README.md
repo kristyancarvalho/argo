@@ -53,6 +53,7 @@ Large downloads should not require an interactive client to remain open, overwri
 
 - Persistent daemon-backed HTTP and HTTPS downloads
 - Redirects, validators, byte ranges, bounded chunking, pause, resume, and crash recovery
+- Optional SHA-256 validation before publication, plus verification of completed files
 - Historical record management with remove, clear, retry, and repeated-URL support
 - Collision-safe final filenames without silently overwriting completed files
 - High, normal, and low scheduling priority with configurable concurrency
@@ -161,6 +162,7 @@ Then use the client from another terminal:
 
 ```sh
 ./bin/argo add https://example.com/archive.iso
+./bin/argo add --checksum sha256:<64-hex-digits> https://example.com/archive.iso
 ./bin/argo list
 ./bin/argo watch
 ```
@@ -177,7 +179,7 @@ Downloads continue after the client exits. Unless configured otherwise, the comp
 
 | Command | Purpose |
 | --- | --- |
-| `argo add <url>` | Add a new HTTP or HTTPS transfer |
+| `argo add [--checksum sha256:<hex>] <url>` | Add a new HTTP or HTTPS transfer with optional integrity validation |
 | `argo list` | List downloads and history |
 | `argo show <id>` | Show complete transfer details |
 | `argo pause <id>` | Pause queued or active work |
@@ -186,6 +188,7 @@ Downloads continue after the client exits. Unless configured otherwise, the comp
 | `argo remove <id>` | Remove one completed, failed, or canceled record and its Argo-owned partial data |
 | `argo clear` | Remove completed, failed, and canceled history without stopping active or resumable work |
 | `argo retry <id>` | Create a new transfer ID from completed, failed, or canceled history |
+| `argo verify <id>` | Recheck a completed file against its stored checksum |
 | `argo priority <id> <level>` | Set queued priority to `low`, `normal`, or `high` |
 | `argo watch` | Redraw live progress in a TTY, or print one snapshot when piped |
 | `argo status` | Show daemon, network, profile, and QoS state |

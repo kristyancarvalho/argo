@@ -129,7 +129,7 @@ func (service *Service) pauseAdmissionOnMetered(
 		return false, err
 	}
 	switch download.Status {
-	case model.StatusQueued, model.StatusResolving, model.StatusDownloading:
+	case model.StatusQueued, model.StatusResolving, model.StatusDownloading, model.StatusVerifying:
 		if err := service.store.UpdateDownloadStatus(
 			ctx,
 			identifier,
@@ -167,7 +167,7 @@ func (service *Service) pauseForMeteredNetwork() error {
 	}
 	for _, download := range downloads {
 		switch download.Status {
-		case model.StatusQueued, model.StatusResolving, model.StatusDownloading:
+		case model.StatusQueued, model.StatusResolving, model.StatusDownloading, model.StatusVerifying:
 		case model.StatusPaused, model.StatusCompleted, model.StatusFailed, model.StatusCanceled:
 			continue
 		}

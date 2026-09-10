@@ -1,6 +1,6 @@
 ---
 title: Download lifecycle and terminal tools
-description: Add, inspect, pause, resume, retry, prioritize, watch, and remove Argo transfers.
+description: Add, verify, inspect, pause, resume, retry, prioritize, watch, and remove Argo transfers.
 ---
 
 ## Historical identity
@@ -18,12 +18,14 @@ Every request receives a new download ID. A completed record remains immutable h
 
 ```sh
 argo add https://example.org/archive.iso
+argo add --checksum sha256:<64-hex-digits> https://example.org/archive.iso
 argo list
 argo show <id>
 argo pause <id>
 argo resume <id>
 argo cancel <id>
 argo retry <id>
+argo verify <id>
 argo remove <id>
 argo clear
 ```
@@ -31,6 +33,8 @@ argo clear
 A canceled download can resume only when valid partial state still exists and the remote resource supports a safe continuation. Argo checks Range behavior plus available ETag or Last-Modified validators before appending. If those checks fail, use `retry` for a clean transfer.
 
 Active downloads cannot be silently removed. Completed files are never deleted by `remove` or `clear`.
+
+When a SHA-256 checksum is supplied, Argo syncs the partial data, enters `verifying`, and compares the complete transfer before final placement. A mismatch becomes a failed, recoverable history record and is never published as a completed file. `verify <id>` rechecks an existing completed file, while `retry <id>` preserves the original checksum on the new transfer.
 
 ## Progress and recovery
 

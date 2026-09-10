@@ -81,6 +81,69 @@ var migrations = []migration{
             )`,
 		},
 	},
+	{
+		version: 6,
+		statements: []string{
+			`CREATE TEMP TABLE download_chunks_v6 AS SELECT
+                download_id, chunk_index, start_byte, end_byte, downloaded_bytes
+                FROM download_chunks`,
+			`DROP TABLE download_chunks`,
+			`ALTER TABLE downloads RENAME TO downloads_v5`,
+			`CREATE TABLE downloads (
+                id TEXT PRIMARY KEY,
+                url TEXT NOT NULL,
+                destination TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                total_size INTEGER NOT NULL CHECK (total_size >= -1),
+                downloaded_bytes INTEGER NOT NULL CHECK (
+                    downloaded_bytes >= 0 AND
+                    (total_size = -1 OR downloaded_bytes <= total_size)
+                ),
+                status TEXT NOT NULL CHECK (
+                    status IN ('queued', 'resolving', 'downloading', 'verifying', 'paused', 'completed', 'failed', 'canceled')
+                ),
+                priority TEXT NOT NULL CHECK (priority IN ('low', 'normal', 'high')),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                started_at TEXT,
+                completed_at TEXT,
+                etag TEXT NOT NULL,
+                last_modified TEXT NOT NULL,
+                range_supported INTEGER NOT NULL DEFAULT 0 CHECK (range_supported IN (0, 1)),
+                checksum TEXT NOT NULL DEFAULT '',
+                error_message TEXT NOT NULL
+            )`,
+			`INSERT INTO downloads (
+                id, url, destination, filename, total_size, downloaded_bytes,
+                status, priority, created_at, updated_at, started_at, completed_at,
+                etag, last_modified, range_supported, checksum, error_message
+            ) SELECT
+                id, url, destination, filename, total_size, downloaded_bytes,
+                status, priority, created_at, updated_at, started_at, completed_at,
+                etag, last_modified, range_supported, '', error_message
+                FROM downloads_v5`,
+			`DROP TABLE downloads_v5`,
+			`CREATE INDEX downloads_status_priority_created_idx
+             ON downloads (status, priority, created_at, id)`,
+			`CREATE TABLE download_chunks (
+                download_id TEXT NOT NULL REFERENCES downloads(id) ON DELETE CASCADE,
+                chunk_index INTEGER NOT NULL CHECK (chunk_index >= 0),
+                start_byte INTEGER NOT NULL CHECK (start_byte >= 0),
+                end_byte INTEGER NOT NULL CHECK (end_byte >= start_byte),
+                downloaded_bytes INTEGER NOT NULL CHECK (
+                    downloaded_bytes >= 0 AND downloaded_bytes <= end_byte - start_byte + 1
+                ),
+                PRIMARY KEY (download_id, chunk_index)
+            )`,
+			`CREATE UNIQUE INDEX download_chunks_bounds_idx
+             ON download_chunks (download_id, start_byte, end_byte)`,
+			`INSERT INTO download_chunks (
+                download_id, chunk_index, start_byte, end_byte, downloaded_bytes
+            ) SELECT download_id, chunk_index, start_byte, end_byte, downloaded_bytes
+                FROM download_chunks_v6`,
+			`DROP TABLE download_chunks_v6`,
+		},
+	},
 }
 
 func migrate(ctx context.Context, database *sql.DB) error {

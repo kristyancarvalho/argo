@@ -38,12 +38,26 @@ func (client *Client) Status(ctx context.Context) (Status, error) {
 }
 
 func (client *Client) Add(ctx context.Context, rawURL, destination string) (AddResponse, error) {
+	return client.AddWithChecksum(ctx, rawURL, destination, "")
+}
+
+func (client *Client) AddWithChecksum(ctx context.Context, rawURL, destination, checksum string) (AddResponse, error) {
 	var response AddResponse
 	if err := client.Call(ctx, OperationAdd, AddRequest{
 		URL:         rawURL,
 		Destination: destination,
+		Checksum:    checksum,
 	}, &response); err != nil {
 		return AddResponse{}, err
+	}
+
+	return response, nil
+}
+
+func (client *Client) Verify(ctx context.Context, id string) (VerifyResponse, error) {
+	var response VerifyResponse
+	if err := client.Call(ctx, OperationVerify, DownloadActionRequest{ID: id}, &response); err != nil {
+		return VerifyResponse{}, err
 	}
 
 	return response, nil
