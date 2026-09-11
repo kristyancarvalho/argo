@@ -1,16 +1,19 @@
 package cli
 
 import (
+	"context"
 	"io"
 	"strings"
 
 	"github.com/kristyancarvalho/argo/internal/console"
+	"github.com/kristyancarvalho/argo/internal/doctor"
 )
 
 type Options struct {
 	Color        bool
 	Interactive  bool
 	TerminalSize func() (int, int)
+	Doctor       func(context.Context) doctor.Report
 }
 
 type styledWriter struct {

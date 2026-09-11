@@ -442,6 +442,8 @@ func TestCLIRejectsInvalidArguments(t *testing.T) {
 		{"priority", "download-id", "high", "extra"},
 		{"watch", "extra"},
 		{"status", "extra"},
+		{"doctor", "extra"},
+		{"doctor", "--unknown"},
 		{"profile"},
 		{"profile", "one", "two"},
 		{"policy"},
@@ -470,7 +472,7 @@ func TestCLIHelpAliases(t *testing.T) {
 			t.Fatalf("%s: %v", command, err)
 		}
 		for _, value := range []string{
-			"Usage:", "add [--checksum sha256:<hex>] <url>", "verify <id>", "Traffic policies:",
+			"Usage:", "add [--checksum sha256:<hex>] <url>", "verify <id>", "doctor [--json]", "Traffic policies:",
 			"Priorities only order queued downloads inside Argo", "privileged argo-qosd helper",
 		} {
 			if !strings.Contains(output.String(), value) {

@@ -59,7 +59,7 @@ Large downloads should not require an interactive client to remain open, overwri
 - High, normal, and low scheduling priority with configurable concurrency
 - XDG-aware configuration, database, runtime socket, and partial-file storage
 - Configurable profiles, rate limits, metered-network behavior, and NetworkManager observation
-- CLI status, non-scrolling live watch mode, human-readable output, and terminal-aware color
+- CLI status and capability diagnostics, non-scrolling live watch mode, human-readable output, and terminal-aware color
 - Responsive TUI with download details, actions, confirmations, help, and narrow-terminal handling
 - Optional cgroup-based traffic classification and Linux RX shaping through nftables, conntrack, `tc`, and IFB
 - Adaptive latency policy using smoothed telemetry and bounded rate changes
@@ -192,6 +192,7 @@ Downloads continue after the client exits. Unless configured otherwise, the comp
 | `argo priority <id> <level>` | Set queued priority to `low`, `normal`, or `high` |
 | `argo watch` | Redraw live progress in a TTY, or print one snapshot when piped |
 | `argo status [--json]` | Show daemon, network, profile, and QoS state, optionally as versioned JSON |
+| `argo doctor [--json]` | Diagnose core download readiness and optional Linux QoS capabilities without changing system state |
 | `argo policy <name>` | Select `off`, `focus`, `balanced`, `throughput`, or `latency` |
 | `argo profile <name>` | Activate a configured profile |
 | `argo tui` | Open the interactive terminal interface |
@@ -199,7 +200,7 @@ Downloads continue after the client exits. Unless configured otherwise, the comp
 
 `argo --help` and `argo -h` are also supported. Set `NO_COLOR=1` to disable color in terminal output.
 
-Machine-readable output uses an envelope containing `schema_version`, `kind`, and `data`. Schema version `1` is available for `list`, `show`, and `status`; it never includes ANSI styling and redacts credentials and query values from source URLs and diagnostics.
+Machine-readable output uses an envelope containing `schema_version`, `kind`, and `data`. Schema version `1` is available for `list`, `show`, `status`, and `doctor`; it never includes ANSI styling and redacts credentials and query values from source URLs and diagnostics.
 
 | Exit code | Meaning |
 | ---: | --- |

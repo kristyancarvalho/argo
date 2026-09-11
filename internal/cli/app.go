@@ -9,6 +9,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/kristyancarvalho/argo/internal/diagnostic"
+	"github.com/kristyancarvalho/argo/internal/doctor"
 	"github.com/kristyancarvalho/argo/internal/ipc"
 )
 
@@ -78,6 +79,8 @@ func RunWithOptions(ctx context.Context, client Client, output io.Writer, argume
 		return runWatch(ctx, client, output, terminalOutput, operands, options)
 	case "status":
 		return runStatus(ctx, client, output, operands, jsonOutput)
+	case "doctor":
+		return runDoctor(ctx, output, operands, options, jsonOutput)
 	case "profile":
 		return runProfile(ctx, client, output, operands)
 	case "policy":
@@ -111,6 +114,7 @@ Commands:
   priority <id> <low|normal|high>   Order queued Argo downloads
   watch                             Stream download progress
   status [--json]                   Show daemon, network, and QoS state
+  doctor [--json]                   Diagnose core and optional capabilities
   policy <name>                     Select a system traffic policy
   profile <name>                    Activate a configured profile
   tui                               Open the terminal interface
@@ -467,6 +471,65 @@ func runStatus(ctx context.Context, client Client, output io.Writer, arguments [
 	return err
 }
 
+func runDoctor(ctx context.Context, output io.Writer, arguments []string, options Options, jsonOutput bool) error {
+	if len(arguments) != 0 {
+		return UsageError{Message: "argo doctor [--json]"}
+	}
+	if options.Doctor == nil {
+		return fmt.Errorf("doctor diagnostics are unavailable")
+	}
+	report := options.Doctor(ctx)
+	if jsonOutput {
+		if err := WriteJSON(output, "doctor", report); err != nil {
+			return err
+		}
+	} else {
+		writer := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
+		if _, err := fmt.Fprintln(writer, "CHECK\tSCOPE\tSTATE\tDETAIL"); err != nil {
+			return err
+		}
+		for _, check := range report.Checks {
+			detail := check.Detail
+			if check.Action != "" {
+				detail += "; action: " + check.Action
+			}
+			if _, err := fmt.Fprintf(
+				writer,
+				"%s\t%s\t%s\t%s\n",
+				diagnostic.Display(check.Name),
+				diagnostic.Display(check.Scope),
+				diagnostic.Display(string(check.State)),
+				diagnostic.Display(diagnostic.Text(detail)),
+			); err != nil {
+				return err
+			}
+		}
+		if _, err := fmt.Fprintf(writer, "Core downloads\t\t%s\nSystem QoS\t\t%s\n", readiness(report.CoreReady), readiness(report.QoSReady)); err != nil {
+			return err
+		}
+		if err := writer.Flush(); err != nil {
+			return err
+		}
+	}
+	if !report.CoreReady {
+		daemonUnavailable := false
+		for _, check := range report.Checks {
+			if check.Name == "daemon" && check.State != doctor.StateAvailable {
+				daemonUnavailable = true
+			}
+		}
+		return DoctorError{DaemonUnavailable: daemonUnavailable}
+	}
+	return nil
+}
+
+func readiness(ready bool) string {
+	if ready {
+		return "ready"
+	}
+	return "unavailable"
+}
+
 func parseJSONOutput(command string, arguments []string) (bool, []string, error) {
 	jsonOutput := false
 	operands := make([]string, 0, len(arguments))
@@ -482,12 +545,12 @@ func parseJSONOutput(command string, arguments []string) (bool, []string, error)
 	}
 	if jsonOutput {
 		switch command {
-		case "list", "show", "status":
+		case "list", "show", "status", "doctor":
 		default:
-			return false, nil, UsageError{Message: "--json is supported by list, show, and status"}
+			return false, nil, UsageError{Message: "--json is supported by list, show, status, and doctor"}
 		}
 	}
-	if command == "list" || command == "show" || command == "status" {
+	if command == "list" || command == "show" || command == "status" || command == "doctor" {
 		for _, operand := range operands {
 			if strings.HasPrefix(operand, "-") {
 				return false, nil, UsageError{Message: fmt.Sprintf("unknown option %q for argo %s", operand, command)}
