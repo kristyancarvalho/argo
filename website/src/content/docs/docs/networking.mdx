@@ -1,6 +1,6 @@
 ---
 title: Network awareness and traffic policies
-description: Understand Argo NetworkManager state, scheduler priority, optional RX shaping, and adaptive latency policy.
+description: Understand Argo NetworkManager state, scheduler priority, optional RX shaping, and adaptive traffic policies.
 ---
 
 Argo separates observing the network, scheduling its own work, and governing system traffic.
@@ -22,6 +22,7 @@ Download priority (`low`, `normal`, or `high`) orders Argo's queued transfers. T
 | `balanced`   | Argo and default traffic receive equal guaranteed classes                   |
 | `throughput` | Argo receives an 80% guaranteed class                                       |
 | `latency`    | A bounded controller adjusts Argo's ceiling from smoothed latency telemetry |
+| `background` | Starts at the minimum, reclaims idle capacity gradually, and yields faster  |
 
 ```sh
 argo policy balanced
@@ -39,5 +40,9 @@ The helper owns narrowly named nftables and `tc` objects and refuses arbitrary s
 ## Adaptive latency
 
 The latency policy establishes a baseline from multiple samples or an explicit `manual_baseline`. It changes the current Argo ceiling gradually within configured `min_rate` and `max_rate` bounds. Missing or stale telemetry produces a safe bounded state rather than an unbounded numerical decision.
+
+The background policy uses the same measured RX ceiling but has a distinct conservative lifecycle. It starts at `min_rate` whenever activated, increases only after consecutive healthy samples, and decreases more aggressively after confirmed target violations. Missing telemetry also moves it toward the minimum. This makes background a feedback policy, not a fixed low cap or an alias for `latency`.
+
+No receiver can remove delay intrinsic to a remote path. If measured latency remains above the target when Argo is already at `min_rate`, status continues to expose that condition instead of claiming that the target is satisfied.
 
 Use `argo status` to inspect measured latency, baseline, controller state, current rate, and helper errors. Results depend on a representative configured `probe_target`; an empty target means active latency sampling is unavailable.

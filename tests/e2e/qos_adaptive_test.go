@@ -90,15 +90,7 @@ func testQoSAdaptiveControlLoop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	adaptive, err := qos.NewAdaptiveController(qos.AdaptiveOptions{
-		MinimumRateBitsPerSecond:  2_000_000,
-		MaximumRateBitsPerSecond:  18_000_000,
-		InitialRateBitsPerSecond:  18_000_000,
-		IncreaseStepBitsPerSecond: 2_000_000,
-		DecreaseStepBitsPerSecond: 4_000_000,
-		AcceptableLatencyIncrease: 15 * time.Millisecond,
-		RequiredSamples:           2,
-	})
+	adaptive, err := qos.NewBackgroundController(2_000_000, 18_000_000, 15*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,8 +135,9 @@ func testQoSAdaptiveControlLoop(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	measurements := observeAdaptivePhase(t, "warmup", 4, policy, controller, cgroup)
 	serverCommand("tc", "qdisc", "change", "dev", "argo-rx-server", "parent", "1:10", "handle", "10:", "netem", "delay", "35ms", "limit", "1000")
-	measurements := observeAdaptivePhase(t, "contended", 4, policy, controller, cgroup)
+	measurements = append(measurements, observeAdaptivePhase(t, "contended", 4, policy, controller, cgroup)...)
 	otherBytes := finishRxClient(t, other, otherOutput)
 	serverCommand("tc", "qdisc", "change", "dev", "argo-rx-server", "parent", "1:10", "handle", "10:", "netem", "delay", "10ms", "limit", "1000")
 	measurements = append(measurements, observeAdaptivePhase(t, "recovery", 4, policy, controller, cgroup)...)
@@ -208,7 +201,7 @@ func observeAdaptivePhase(t *testing.T, phase string, samples int, policy *qos.L
 
 func reconcileAdaptiveState(t *testing.T, controller *qos.Controller, cgroup qos.CgroupSelector, rate uint64) {
 	t.Helper()
-	state, err := qos.MapAdaptivePolicy(qos.PolicyEnvironment{
+	state, err := qos.MapAdaptivePolicyFor(qos.PolicyBackground, qos.PolicyEnvironment{
 		Interface: "argo-rx-client", LinkRateBitsPerSecond: 20_000_000,
 		Cgroup: cgroup, ActiveDownloads: 1,
 	}, rate)
@@ -256,40 +249,48 @@ func probeLatencyCount(count int) (time.Duration, error) {
 
 func assertAdaptiveMeasurements(t *testing.T, baseline time.Duration, measurements []adaptiveMeasurement) {
 	t.Helper()
-	if len(measurements) != 8 {
+	if len(measurements) != 12 {
 		t.Fatalf("unexpected adaptive measurement count: %d", len(measurements))
 	}
 	minimum := uint64(18_000_000)
-	directions := make([]int, 0)
-	previous := uint64(18_000_000)
 	for _, measurement := range measurements {
 		if measurement.rate < 2_000_000 || measurement.rate > 18_000_000 {
 			t.Fatalf("adaptive rate escaped bounds: %+v", measurement)
 		}
 		minimum = min(minimum, measurement.rate)
-		if measurement.rate < previous {
-			directions = append(directions, -1)
-		} else if measurement.rate > previous {
-			directions = append(directions, 1)
-		}
-		previous = measurement.rate
 	}
-	if minimum >= 18_000_000 {
+	warmupRate := measurements[3].rate
+	contendedRate := measurements[7].rate
+	recoveryRate := measurements[11].rate
+	if warmupRate <= 2_000_000 {
+		t.Fatalf("background controller did not reclaim idle capacity: rate=%d", warmupRate)
+	}
+	if contendedRate >= warmupRate || minimum != 2_000_000 {
 		t.Fatal("adaptive controller did not yield during elevated latency")
 	}
-	if measurements[len(measurements)-1].rate <= minimum {
-		t.Fatalf("adaptive controller did not reclaim capacity: minimum=%d final=%d", minimum, measurements[len(measurements)-1].rate)
+	if recoveryRate <= contendedRate {
+		t.Fatalf("adaptive controller did not reclaim capacity: contended=%d recovery=%d", contendedRate, recoveryRate)
 	}
-	changes := 0
-	for index := 1; index < len(directions); index++ {
-		if directions[index] != directions[index-1] {
-			changes++
+	for start := 0; start < len(measurements); start += 4 {
+		direction := 0
+		previous := measurements[start].rate
+		for _, measurement := range measurements[start+1 : start+4] {
+			change := 0
+			if measurement.rate < previous {
+				change = -1
+			} else if measurement.rate > previous {
+				change = 1
+			}
+			if change != 0 && direction != 0 && change != direction {
+				t.Fatalf("adaptive controller oscillated within phase: %+v", measurements[start:start+4])
+			}
+			if change != 0 {
+				direction = change
+			}
+			previous = measurement.rate
 		}
 	}
-	if changes > 1 {
-		t.Fatalf("adaptive controller oscillated across phases: %+v", directions)
-	}
-	for _, measurement := range measurements[:4] {
+	for _, measurement := range measurements[4:8] {
 		if measurement.latency <= baseline+15*time.Millisecond {
 			t.Fatalf("contended latency did not exceed SLO: baseline=%s measurement=%+v", baseline, measurement)
 		}

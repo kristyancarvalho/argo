@@ -126,6 +126,7 @@ Traffic policies:
   balanced    Split guaranteed capacity equally
   throughput  Favor Argo downloads; reserve 80% for Argo
   latency     Adapt the Argo limit from measured latency
+  background  Start conservatively, use idle capacity, and yield on latency
 
 Priorities only order queued downloads inside Argo. Policies control how Argo
 competes with other applications and require an active download, a configured
@@ -140,7 +141,7 @@ new transfer ID from completed, failed, or canceled history.
 
 func runPolicy(ctx context.Context, client Client, output io.Writer, arguments []string) error {
 	if len(arguments) != 1 {
-		return UsageError{Message: "argo policy <off|balanced|throughput|latency|focus>"}
+		return UsageError{Message: "argo policy <off|balanced|throughput|latency|focus|background>"}
 	}
 	policy, err := client.Policy(ctx, arguments[0])
 	if err != nil {
@@ -450,7 +451,7 @@ func runStatus(ctx context.Context, client Client, output io.Writer, arguments [
 			return err
 		}
 	}
-	if status.Traffic.Policy == "latency" {
+	if status.Traffic.Policy == "latency" || status.Traffic.Policy == "background" {
 		latency := "unavailable"
 		if status.Traffic.LatencyAvailable {
 			latency = status.Traffic.MeasuredLatency.String()

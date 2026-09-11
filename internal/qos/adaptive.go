@@ -68,6 +68,31 @@ func NewAdaptiveController(options AdaptiveOptions) (*AdaptiveController, error)
 	return &AdaptiveController{options: options, rate: options.InitialRateBitsPerSecond}, nil
 }
 
+func NewBackgroundController(minimum, maximum uint64, target time.Duration) (*AdaptiveController, error) {
+	if maximum <= minimum {
+		return nil, fmt.Errorf("background rate bounds must be positive and increasing")
+	}
+	span := maximum - minimum
+	increase := span / 20
+	decrease := span / 4
+	if increase == 0 {
+		increase = 1
+	}
+	if decrease == 0 {
+		decrease = 1
+	}
+
+	return NewAdaptiveController(AdaptiveOptions{
+		MinimumRateBitsPerSecond:  minimum,
+		MaximumRateBitsPerSecond:  maximum,
+		InitialRateBitsPerSecond:  minimum,
+		IncreaseStepBitsPerSecond: increase,
+		DecreaseStepBitsPerSecond: decrease,
+		AcceptableLatencyIncrease: target,
+		RequiredSamples:           2,
+	})
+}
+
 func (controller *AdaptiveController) Update(signal AdaptiveSignal) AdaptiveState {
 	controller.mutex.Lock()
 	defer controller.mutex.Unlock()

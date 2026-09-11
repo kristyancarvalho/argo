@@ -62,7 +62,7 @@ Large downloads should not require an interactive client to remain open, overwri
 - CLI status and capability diagnostics, non-scrolling live watch mode, human-readable output, and terminal-aware color
 - Responsive TUI with download details, actions, confirmations, help, and narrow-terminal handling
 - Optional cgroup-based traffic classification and Linux RX shaping through nftables, conntrack, `tc`, and IFB
-- Adaptive latency policy using smoothed telemetry and bounded rate changes
+- Adaptive latency and background policies using smoothed telemetry and bounded rate changes
 - Unprivileged main daemon with a separate `CAP_NET_ADMIN` QoS helper
 
 ### Current boundaries
@@ -193,7 +193,7 @@ Downloads continue after the client exits. Unless configured otherwise, the comp
 | `argo watch` | Redraw live progress in a TTY, or print one snapshot when piped |
 | `argo status [--json]` | Show daemon, network, profile, and QoS state, optionally as versioned JSON |
 | `argo doctor [--json]` | Diagnose core download readiness and optional Linux QoS capabilities without changing system state |
-| `argo policy <name>` | Select `off`, `focus`, `balanced`, `throughput`, or `latency` |
+| `argo policy <name>` | Select `off`, `focus`, `balanced`, `throughput`, `latency`, or `background` |
 | `argo profile <name>` | Activate a configured profile |
 | `argo tui` | Open the interactive terminal interface |
 | `argo help` | Show built-in command help |
@@ -276,8 +276,11 @@ Traffic policy affects active download traffic relative to the default system cl
 | `balanced` | Split guaranteed capacity equally |
 | `throughput` | Reserve 80% of guaranteed capacity for Argo |
 | `latency` | Adjust Argo's limit from measured latency within configured bounds |
+| `background` | Start at the configured minimum, reclaim idle capacity gradually, and yield faster when latency exceeds its target |
 
 Unused capacity can be borrowed by either class. Policies are applied only while downloads are active and require a nonzero `qos.link_rate`, a connected interface, and `argo-qosd`. Argo classifies `argod` through its cgroup, carries that identity through conntrack, and redirects received traffic to an Argo-owned IFB before shaping it.
+
+`latency` begins at the configured maximum and adjusts around the latency target. `background` begins at the configured minimum on each activation, increases after consecutive healthy samples, and decreases more aggressively after consecutive target violations or missing telemetry. A remote path whose own baseline changes can remain above the target even after Argo reaches its minimum; status reports the measured state rather than claiming that every external delay is controllable.
 
 Use `argo status` for the current policy and any helper error. On a configured host, inspect live kernel state with `sudo tc -s class show dev <interface>` and `sudo nft list table inet argo` while a transfer is active.
 

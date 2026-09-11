@@ -199,6 +199,36 @@ func TestCLIStatusShowsNetworkAndProfile(t *testing.T) {
 	}
 }
 
+func TestCLIStatusShowsBackgroundDiagnostics(t *testing.T) {
+	client := &backgroundStatusClient{cliClient: &cliClient{}}
+	var output bytes.Buffer
+	if err := cli.Run(context.Background(), client, &output, []string{"status"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []string{
+		"Traffic policy: background",
+		"Current limit: 50000000 bit/s",
+		"Measured latency: 25ms",
+		"Baseline latency: 20ms",
+		"Controller: stable",
+	} {
+		if !strings.Contains(output.String(), value) {
+			t.Fatalf("status output %q does not contain %q", output.String(), value)
+		}
+	}
+}
+
+type backgroundStatusClient struct {
+	*cliClient
+}
+
+func (client *backgroundStatusClient) Status(ctx context.Context) (ipc.Status, error) {
+	status, err := client.cliClient.Status(ctx)
+	status.Traffic.Policy = "background"
+
+	return status, err
+}
+
 type secretShowClient struct {
 	*cliClient
 }
@@ -323,6 +353,7 @@ func TestCLICommands(t *testing.T) {
 		{"profile", []string{"profile", "gaming"}, "profile:gaming", "Active profile: gaming"},
 		{"policy", []string{"policy", "balanced"}, "policy:balanced", "Traffic policy: balanced (active)"},
 		{"policy off", []string{"policy", "off"}, "policy:off", "Traffic policy: off (inactive)"},
+		{"policy background", []string{"policy", "background"}, "policy:background", "Traffic policy: background (active)"},
 	}
 
 	for _, test := range tests {
@@ -473,6 +504,7 @@ func TestCLIHelpAliases(t *testing.T) {
 		}
 		for _, value := range []string{
 			"Usage:", "add [--checksum sha256:<hex>] <url>", "verify <id>", "doctor [--json]", "Traffic policies:",
+			"background",
 			"Priorities only order queued downloads inside Argo", "privileged argo-qosd helper",
 		} {
 			if !strings.Contains(output.String(), value) {
