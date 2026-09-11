@@ -307,7 +307,7 @@ func (model Model) View() string {
 		return model.boundView(view.String())
 	}
 	if model.mode == inputModePolicy {
-		view.WriteString(console.Paint(model.color, console.Cyan, "\nSelect traffic policy: 1 off  2 balanced  3 throughput  4 latency  5 focus  Esc cancel\n"))
+		view.WriteString(console.Paint(model.color, console.Cyan, "\nSelect traffic policy: 1 off  2 balanced  3 throughput  4 latency  5 focus  6 background  Esc cancel\n"))
 		return model.boundView(view.String())
 	}
 	if model.actionErr != nil {
@@ -392,7 +392,7 @@ func (model Model) compactView(width int) string {
 	case inputModeProfile:
 		contextLine = "Profile: " + diagnostic.Display(model.input)
 	case inputModePolicy:
-		contextLine = "Policy: 1 off 2 balanced 3 throughput 4 latency 5 focus"
+		contextLine = "Policy: 1 off 2 balanced 3 throughput 4 latency 5 focus 6 background"
 	case inputModeClear:
 		contextLine = "Clear history? y/N"
 	case inputModeCancel:
@@ -631,7 +631,7 @@ func (model Model) updatePolicySelection(message tea.KeyMsg) (tea.Model, tea.Cmd
 		return model, nil
 	}
 	policies := map[string]string{
-		"1": "off", "2": "balanced", "3": "throughput", "4": "latency", "5": "focus",
+		"1": "off", "2": "balanced", "3": "throughput", "4": "latency", "5": "focus", "6": "background",
 	}
 	policy, exists := policies[message.String()]
 	if !exists {

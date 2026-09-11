@@ -5,7 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kristyancarvalho/argo/internal/daemon"
 	"github.com/kristyancarvalho/argo/internal/ipc"
+	"github.com/kristyancarvalho/argo/internal/network"
 	"github.com/kristyancarvalho/argo/internal/qos"
 	"github.com/kristyancarvalho/argo/internal/telemetry"
 )
@@ -65,6 +67,50 @@ func TestAdaptiveStatusIsQuietWhenPolicyIsOff(t *testing.T) {
 		status.Traffic.BaselineAvailable || status.Traffic.ControllerState != "" {
 		t.Fatalf("unexpected off policy status: %+v", status.Traffic)
 	}
+}
+
+func TestBackgroundStatusReportsAdaptiveDiagnostics(t *testing.T) {
+	baseline, err := telemetry.NewBaselineEstimator(telemetry.BaselineOptions{Manual: 20 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	controller, err := qos.NewBackgroundController(20_000_000, 80_000_000, 10*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	background, err := qos.NewLatencyPolicy(baseline, controller)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := openTestStore(t)
+	engine := newControlledDownloadEngine(store, "background-status")
+	networkObserver := newControlledNetworkObserver()
+	telemetryObserver := &controlledTelemetryObserver{updates: make(chan controlledTelemetryUpdate, 2)}
+	service, err := daemon.NewServiceWithOptions(context.Background(), store, engine, daemon.ServiceOptions{
+		MaximumConcurrentDownloads: 1,
+		NetworkObserver:            networkObserver,
+		TrafficLinkRate:            100_000_000,
+		TrafficCgroup:              qos.CgroupSelector{Path: "argo.service", Level: 1},
+		TrafficBackend:             &trafficPolicyBackend{},
+		TelemetryObserver:          telemetryObserver,
+		BackgroundPolicy:           background,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeSchedulerService(t, service)
+	networkObserver.send(t, network.Snapshot{Connected: true, Interface: "eth0"})
+	identifier := addScheduledDownload(t, service, "background-status")
+	assertStartedDownload(t, engine, identifier)
+	selectTrafficPolicy(t, service, qos.PolicyBackground)
+	telemetryObserver.send(t, adaptiveSnapshot(25*time.Millisecond, time.Now().UTC()))
+	status := adaptiveServiceStatus(t, service)
+	if status.Traffic.Policy != "background" || !status.Traffic.Applied ||
+		status.Traffic.CurrentRateBitsPerSecond != 20_000_000 || !status.Traffic.LatencyAvailable ||
+		!status.Traffic.BaselineAvailable || status.Traffic.ControllerState == "" {
+		t.Fatalf("unexpected background diagnostics: %+v", status.Traffic)
+	}
+	engine.release("background-status")
 }
 
 func adaptiveServiceStatus(t *testing.T, service ipc.Handler) ipc.Status {

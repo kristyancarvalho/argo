@@ -361,6 +361,23 @@ func TestTUIAdaptivePolicyActive(t *testing.T) {
 	}
 }
 
+func TestTUIBackgroundPolicyShowsAdaptiveDiagnostics(t *testing.T) {
+	model := loadTUIModel(t, &tuiStatusClient{status: ipc.Status{
+		State: "running", Traffic: ipc.TrafficStatus{
+			Policy: "background", CurrentRateBitsPerSecond: 25_000_000,
+			MeasuredLatency: 24 * time.Millisecond, LatencyAvailable: true,
+			BaselineLatency: 18 * time.Millisecond, BaselineAvailable: true,
+			ControllerState: "stable",
+		},
+	}})
+	view := model.View()
+	for _, value := range []string{"Traffic policy: background", "Adaptive limit: 25000000 bit/s", "Latency: 24ms (baseline 18ms)", "Controller: stable"} {
+		if !strings.Contains(view, value) {
+			t.Fatalf("background view %q does not contain %q", view, value)
+		}
+	}
+}
+
 func TestTUIShowsQoSError(t *testing.T) {
 	model := loadTUIModel(t, &tuiStatusClient{status: ipc.Status{
 		State: "running", Traffic: ipc.TrafficStatus{Policy: "throughput", Error: "helper unavailable"},
@@ -716,6 +733,20 @@ func TestTUIPolicySelection(t *testing.T) {
 	updated, _ = updated.(tui.Model).Update(command())
 	if strings.Join(client.actions, ",") != "policy:latency" || !strings.Contains(updated.(tui.Model).View(), "Traffic policy: latency") {
 		t.Fatalf("unexpected policy result: actions=%v view=%q", client.actions, updated.(tui.Model).View())
+	}
+}
+
+func TestTUIBackgroundPolicySelection(t *testing.T) {
+	client := &tuiStatusClient{status: ipc.Status{State: "running"}}
+	model := loadTUIModel(t, client)
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	updated, command := updated.(tui.Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
+	if command == nil {
+		t.Fatal("background policy selection did not dispatch")
+	}
+	updated, _ = updated.(tui.Model).Update(command())
+	if strings.Join(client.actions, ",") != "policy:background" || !strings.Contains(updated.(tui.Model).View(), "Traffic policy: background") {
+		t.Fatalf("unexpected background result: actions=%v view=%q", client.actions, updated.(tui.Model).View())
 	}
 }
 

@@ -7,7 +7,7 @@ import (
 )
 
 func TestQoSPolicyValidation(t *testing.T) {
-	for _, name := range []string{"off", "balanced", "throughput", "latency", "focus"} {
+	for _, name := range []string{"off", "balanced", "throughput", "latency", "focus", "background"} {
 		policy, err := qos.ParsePolicy(name)
 		if err != nil {
 			t.Fatal(err)

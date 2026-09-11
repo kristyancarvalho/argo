@@ -99,6 +99,7 @@ type ServiceOptions struct {
 	TrafficBackend             qos.Backend
 	TelemetryObserver          TelemetryObserver
 	LatencyPolicy              *qos.LatencyPolicy
+	BackgroundPolicy           *qos.LatencyPolicy
 }
 
 type Profile struct {
@@ -110,6 +111,7 @@ type Profile struct {
 	ResumeAfterMetered         bool
 	Policy                     string
 	LatencyPolicy              *qos.LatencyPolicy
+	BackgroundPolicy           *qos.LatencyPolicy
 }
 
 type priorityUpdate struct {
@@ -169,6 +171,7 @@ type Service struct {
 	trafficError       string
 	telemetryObserver  TelemetryObserver
 	latencyPolicy      *qos.LatencyPolicy
+	backgroundPolicy   *qos.LatencyPolicy
 	partialCleaner     PartialCleaner
 }
 
@@ -252,6 +255,7 @@ func NewServiceWithOptions(
 		options.ResumeAfterMetered = profile.ResumeAfterMetered
 		options.TrafficPolicy = qos.Policy(profile.Policy)
 		options.LatencyPolicy = profile.LatencyPolicy
+		options.BackgroundPolicy = profile.BackgroundPolicy
 	}
 	if len(profiles) > 0 && (!supportsProfiles || !controlsRate) {
 		return nil, fmt.Errorf("service dependencies cannot apply profiles")
@@ -320,6 +324,7 @@ func NewServiceWithOptions(
 		trafficCgroup:      options.TrafficCgroup,
 		telemetryObserver:  options.TelemetryObserver,
 		latencyPolicy:      options.LatencyPolicy,
+		backgroundPolicy:   options.BackgroundPolicy,
 	}
 	service.partialCleaner, _ = engine.(PartialCleaner)
 	if service.networkObserver == nil {
@@ -409,6 +414,7 @@ func (service *Service) statusResponse() ipc.Status {
 	status.ActiveProfile = service.activeProfile
 	policy := service.trafficPolicy
 	latencyPolicy := service.latencyPolicy
+	backgroundPolicy := service.backgroundPolicy
 	service.profileMutex.RUnlock()
 	status.Traffic.Policy = string(policy)
 	service.trafficErrorMutex.RLock()
@@ -421,8 +427,12 @@ func (service *Service) statusResponse() ipc.Status {
 			status.Traffic.CurrentRateBitsPerSecond = current.ArgoRateBitsPerSecond
 		}
 	}
-	if policy == qos.PolicyLatency && latencyPolicy != nil {
-		diagnostics := latencyPolicy.Diagnostics(time.Now().UTC())
+	adaptivePolicy := latencyPolicy
+	if policy == qos.PolicyBackground {
+		adaptivePolicy = backgroundPolicy
+	}
+	if (policy == qos.PolicyLatency || policy == qos.PolicyBackground) && adaptivePolicy != nil {
+		diagnostics := adaptivePolicy.Diagnostics(time.Now().UTC())
 		status.Traffic.CurrentRateBitsPerSecond = diagnostics.State.RateBitsPerSecond
 		status.Traffic.MeasuredLatency = diagnostics.MeasuredLatency
 		status.Traffic.LatencyAvailable = diagnostics.LatencyAvailable
@@ -999,6 +1009,9 @@ func (service *Service) setProfile(ctx context.Context, payload json.RawMessage)
 	if err := service.rateController.SetRateLimit(profile.BytesPerSecond); err != nil {
 		return ipc.ProfileResponse{}, err
 	}
+	if qos.Policy(profile.Policy) == qos.PolicyBackground && profile.BackgroundPolicy != nil {
+		profile.BackgroundPolicy.Reset()
+	}
 	service.profileMutex.Lock()
 	service.activeProfile = profile.Name
 	service.defaultPriority = profile.DefaultPriority
@@ -1006,6 +1019,7 @@ func (service *Service) setProfile(ctx context.Context, payload json.RawMessage)
 	service.resumeAfterMetered = profile.ResumeAfterMetered
 	service.trafficPolicy = qos.Policy(profile.Policy)
 	service.latencyPolicy = profile.LatencyPolicy
+	service.backgroundPolicy = profile.BackgroundPolicy
 	service.profileMutex.Unlock()
 	if err := service.updateSchedulerLimit(ctx, profile.MaximumConcurrentDownloads); err != nil {
 		return ipc.ProfileResponse{}, err

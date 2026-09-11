@@ -197,7 +197,7 @@ func (configuration Config) Validate() error {
 		}
 	}
 	switch configuration.QoS.Policy {
-	case "off", "balanced", "throughput", "latency", "focus":
+	case "off", "balanced", "throughput", "latency", "focus", "background":
 	default:
 		return ValidationError{Field: "qos.policy", Reason: "is not recognized"}
 	}
@@ -324,7 +324,7 @@ func (configuration Config) Profile(name string) (EffectiveProfile, error) {
 	}
 	if profile.Policy != "" {
 		switch profile.Policy {
-		case "off", "balanced", "throughput", "latency", "focus":
+		case "off", "balanced", "throughput", "latency", "focus", "background":
 			effective.Policy = profile.Policy
 		default:
 			return EffectiveProfile{}, ValidationError{

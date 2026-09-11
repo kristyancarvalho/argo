@@ -139,7 +139,7 @@ func GenerateTreeForState(state qos.DesiredState) (Tree, error) {
 		return Tree{}, fmt.Errorf("cannot generate tc tree for disabled QoS state")
 	}
 	ceiling := state.LinkRateBitsPerSecond
-	if state.Policy == qos.PolicyLatency {
+	if state.Policy == qos.PolicyLatency || state.Policy == qos.PolicyBackground {
 		ceiling = state.ArgoRateBitsPerSecond
 	}
 

@@ -120,6 +120,35 @@ func TestAdaptiveControllerResetAndValidation(t *testing.T) {
 	}
 }
 
+func TestBackgroundControllerStartsLowAndYieldsFaster(t *testing.T) {
+	controller, err := qos.NewBackgroundController(20_000_000, 80_000_000, 10*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state := controller.Current(); state.RateBitsPerSecond != 20_000_000 {
+		t.Fatalf("background controller started at %+v", state)
+	}
+	healthy := qos.AdaptiveSignal{Latency: 21 * time.Millisecond, Baseline: 20 * time.Millisecond, Available: true}
+	controller.Update(healthy)
+	if state := controller.Update(healthy); !state.Changed || state.RateBitsPerSecond != 23_000_000 {
+		t.Fatalf("background controller did not reclaim gradually: %+v", state)
+	}
+	high := qos.AdaptiveSignal{Latency: 50 * time.Millisecond, Baseline: 20 * time.Millisecond, Available: true}
+	controller.Update(high)
+	if state := controller.Update(high); !state.Changed || state.RateBitsPerSecond != 20_000_000 {
+		t.Fatalf("background controller did not yield rapidly: %+v", state)
+	}
+	controller.Update(healthy)
+	controller.Update(healthy)
+	controller.Update(qos.AdaptiveSignal{})
+	if state := controller.Update(qos.AdaptiveSignal{}); !state.Changed || state.RateBitsPerSecond != 20_000_000 || state.Reason != qos.AdaptiveTelemetryMissing {
+		t.Fatalf("background controller did not fail safe without telemetry: %+v", state)
+	}
+	if _, err := qos.NewBackgroundController(0, 0, 10*time.Millisecond); err == nil {
+		t.Fatal("invalid background controller bounds were accepted")
+	}
+}
+
 func newTestAdaptiveController(t *testing.T) *qos.AdaptiveController {
 	t.Helper()
 	controller, err := qos.NewAdaptiveController(qos.AdaptiveOptions{

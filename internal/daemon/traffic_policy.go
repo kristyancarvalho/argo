@@ -23,8 +23,15 @@ func (service *Service) setTrafficPolicy(
 	if err != nil {
 		return ipc.PolicyResponse{}, InvalidDownloadActionError{Action: "policy", Reason: err.Error()}
 	}
-	if policy == qos.PolicyLatency && service.currentLatencyPolicy() == nil {
+	if policy == qos.PolicyLatency && service.currentLatencyPolicy(qos.PolicyLatency) == nil {
 		return ipc.PolicyResponse{}, PolicyUnavailableError{Reason: "latency policy is not configured"}
+	}
+	backgroundPolicy := service.currentLatencyPolicy(qos.PolicyBackground)
+	if policy == qos.PolicyBackground && backgroundPolicy == nil {
+		return ipc.PolicyResponse{}, PolicyUnavailableError{Reason: "background policy is not configured"}
+	}
+	if policy == qos.PolicyBackground {
+		backgroundPolicy.Reset()
 	}
 	service.profileMutex.Lock()
 	previous := service.trafficPolicy
@@ -53,6 +60,7 @@ func (service *Service) reconcileTrafficPolicy(ctx context.Context) (resultErr e
 	service.profileMutex.RLock()
 	policy := service.trafficPolicy
 	latencyPolicy := service.latencyPolicy
+	backgroundPolicy := service.backgroundPolicy
 	service.profileMutex.RUnlock()
 	downloads, err := service.store.Downloads(ctx)
 	if err != nil {
@@ -78,10 +86,15 @@ func (service *Service) reconcileTrafficPolicy(ctx context.Context) (resultErr e
 			Cgroup:                service.trafficCgroup,
 			ActiveDownloads:       active,
 		}
-		if policy == qos.PolicyLatency && latencyPolicy != nil {
-			desired, err = qos.MapAdaptivePolicy(
+		adaptivePolicy := latencyPolicy
+		if policy == qos.PolicyBackground {
+			adaptivePolicy = backgroundPolicy
+		}
+		if (policy == qos.PolicyLatency || policy == qos.PolicyBackground) && adaptivePolicy != nil {
+			desired, err = qos.MapAdaptivePolicyFor(
+				policy,
 				environment,
-				latencyPolicy.Current().RateBitsPerSecond,
+				adaptivePolicy.Current().RateBitsPerSecond,
 			)
 		} else {
 			desired, err = qos.MapPolicy(policy, environment)
@@ -112,14 +125,23 @@ func (service *Service) setTrafficError(err error) {
 func (service *Service) runTelemetryObserver() {
 	defer service.waitGroup.Done()
 	_ = service.telemetryObserver.Observe(service.ctx, func(snapshot telemetry.Snapshot) error {
-		latencyPolicy := service.currentLatencyPolicy()
+		service.profileMutex.RLock()
+		activePolicy := service.trafficPolicy
+		service.profileMutex.RUnlock()
+		latencyPolicy := service.currentLatencyPolicy(activePolicy)
+		if latencyPolicy == nil && activePolicy != qos.PolicyBackground {
+			latencyPolicy = service.currentLatencyPolicy(qos.PolicyLatency)
+		}
 		if latencyPolicy == nil {
 			return nil
 		}
+		if activePolicy == qos.PolicyBackground && snapshot.ActiveTransfers == 0 {
+			latencyPolicy.ObserveBaseline(snapshot)
+			latencyPolicy.Reset()
+			return nil
+		}
 		latencyPolicy.Observe(snapshot)
-		service.profileMutex.RLock()
-		active := service.trafficPolicy == qos.PolicyLatency
-		service.profileMutex.RUnlock()
+		active := activePolicy == qos.PolicyLatency || activePolicy == qos.PolicyBackground
 		if active {
 			_ = service.reconcileTrafficPolicy(service.ctx)
 		}
@@ -128,9 +150,11 @@ func (service *Service) runTelemetryObserver() {
 	})
 }
 
-func (service *Service) currentLatencyPolicy() *qos.LatencyPolicy {
+func (service *Service) currentLatencyPolicy(policy qos.Policy) *qos.LatencyPolicy {
 	service.profileMutex.RLock()
 	defer service.profileMutex.RUnlock()
-
+	if policy == qos.PolicyBackground {
+		return service.backgroundPolicy
+	}
 	return service.latencyPolicy
 }
