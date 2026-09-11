@@ -43,6 +43,7 @@ type Engine struct {
 	parts      string
 	strict     sync.Map
 	checkpoint func(string) error
+	retry      retryPolicy
 }
 
 type Options struct {
@@ -53,6 +54,7 @@ type Options struct {
 	ChunkProgress          func(model.DownloadID, ChunkProgress)
 	PartsDirectory         string
 	FinalizationCheckpoint func(string) error
+	Retry                  RetryOptions
 }
 
 func New(store Store) *Engine {
@@ -99,6 +101,10 @@ func NewWithOptions(store Store, options Options) (*Engine, error) {
 	if !filepath.IsAbs(parts) {
 		return nil, fmt.Errorf("partial directory must be absolute")
 	}
+	retry, err := newRetryPolicy(options.Retry)
+	if err != nil {
+		return nil, err
+	}
 
 	engine := &Engine{
 		httpClient: options.HTTPClient,
@@ -109,6 +115,7 @@ func NewWithOptions(store Store, options Options) (*Engine, error) {
 		observer:   options.ChunkProgress,
 		parts:      filepath.Clean(parts),
 		checkpoint: options.FinalizationCheckpoint,
+		retry:      retry,
 	}
 	engine.rateLimit.Store(options.BytesPerSecond)
 
@@ -153,7 +160,7 @@ func (engine *Engine) Download(ctx context.Context, download model.Download) err
 	} else if recovered {
 		return nil
 	}
-	metadata, err := NewInspector(engine.httpClient).Inspect(ctx, download.URL)
+	metadata, err := newInspector(engine.httpClient, engine.retry).Inspect(ctx, download.URL)
 	if err != nil {
 		return engine.fail(ctx, download.ID, err)
 	}
@@ -201,36 +208,6 @@ func (engine *Engine) Download(ctx context.Context, download model.Download) err
 		}
 	}
 
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, download.URL, nil)
-	if err != nil {
-		return engine.fail(ctx, download.ID, fmt.Errorf("create HTTP request: %w", err))
-	}
-	if offset > 0 {
-		request.Header.Set("Range", fmt.Sprintf("bytes=%d-", offset))
-	}
-	bindRepresentation(request, metadata)
-	response, err := engine.httpClient.Do(request)
-	if err != nil {
-		return engine.fail(ctx, download.ID, fmt.Errorf("perform HTTP request: %w", err))
-	}
-	defer func() {
-		_ = response.Body.Close()
-	}()
-	if err := validateRepresentation(response, metadata); err != nil {
-		return engine.fail(ctx, download.ID, err)
-	}
-
-	responseOffset, totalSize, err := resolveResponse(response, offset)
-	if err != nil {
-		return engine.fail(ctx, download.ID, err)
-	}
-	if responseOffset != offset {
-		offset = responseOffset
-		if err := engine.store.UpdateDownloadProgress(ctx, download.ID, offset, engine.now()); err != nil {
-			return engine.fail(ctx, download.ID, err)
-		}
-	}
-
 	partial, err := engine.openPartial(download.ID, offset)
 	if err != nil {
 		return engine.fail(ctx, download.ID, err)
@@ -242,50 +219,9 @@ func (engine *Engine) Download(ctx context.Context, download model.Download) err
 		}
 	}()
 
-	etag := response.Header.Get("ETag")
-	if etag == "" {
-		etag = metadata.ETag
-	}
-	lastModified := response.Header.Get("Last-Modified")
-	if lastModified == "" {
-		lastModified = metadata.LastModified
-	}
-	if err := engine.store.UpdateRemoteMetadata(
-		ctx,
-		download.ID,
-		totalSize,
-		metadata.RangeSupported || response.StatusCode == http.StatusPartialContent,
-		etag,
-		lastModified,
-		engine.now(),
-	); err != nil {
-		return engine.fail(ctx, download.ID, err)
-	}
-	if resolving {
-		if err := engine.store.UpdateDownloadStatus(
-			ctx,
-			download.ID,
-			model.StatusDownloading,
-			engine.now(),
-			"",
-		); err != nil {
-			return engine.fail(ctx, download.ID, err)
-		}
-	}
-
-	downloaded, err := engine.copy(
-		ctx,
-		download.ID,
-		partial,
-		response.Body,
-		offset,
-		newRateLimiter(engine.rateLimit.Load),
-	)
+	downloaded, totalSize, err := engine.transferSerial(ctx, download, metadata, partial, offset, resolving)
 	if err != nil {
 		return engine.fail(ctx, download.ID, err)
-	}
-	if response.ContentLength >= 0 && downloaded-offset != response.ContentLength {
-		return engine.fail(ctx, download.ID, io.ErrUnexpectedEOF)
 	}
 	if totalSize >= 0 && downloaded != totalSize {
 		return engine.fail(ctx, download.ID, io.ErrUnexpectedEOF)
@@ -306,6 +242,108 @@ func (engine *Engine) Download(ctx context.Context, download model.Download) err
 	}
 	partialOpen = false
 	return engine.failFinalization(ctx, download.ID, engine.completeCurrentFinalization(ctx, download, finalPath))
+}
+
+func (engine *Engine) transferSerial(
+	ctx context.Context,
+	download model.Download,
+	metadata RemoteMetadata,
+	partial *os.File,
+	offset int64,
+	resolving bool,
+) (int64, int64, error) {
+	limiter := newRateLimiter(engine.rateLimit.Load)
+	totalSize := metadata.TotalSize
+	for attempt := 0; attempt < engine.retry.attempts; attempt++ {
+		requestedOffset := offset
+		response, err := engine.retry.do(ctx, func() (*http.Request, error) {
+			request, err := http.NewRequestWithContext(ctx, http.MethodGet, download.URL, nil)
+			if err != nil {
+				return nil, fmt.Errorf("create HTTP request: %w", err)
+			}
+			if requestedOffset > 0 {
+				request.Header.Set("Range", fmt.Sprintf("bytes=%d-", requestedOffset))
+			}
+			bindRepresentation(request, metadata)
+			return request, nil
+		}, engine.httpClient)
+		if err != nil {
+			return offset, totalSize, fmt.Errorf("perform HTTP request: %w", err)
+		}
+		if err := validateRepresentation(response, metadata); err != nil {
+			_ = response.Body.Close()
+			return offset, totalSize, err
+		}
+		responseOffset, responseTotal, err := resolveResponse(response, requestedOffset)
+		if err != nil {
+			_ = response.Body.Close()
+			return offset, totalSize, err
+		}
+		if responseOffset != requestedOffset {
+			if err := partial.Truncate(responseOffset); err != nil {
+				_ = response.Body.Close()
+				return offset, totalSize, fmt.Errorf("truncate restarted partial file: %w", err)
+			}
+			if _, err := partial.Seek(responseOffset, io.SeekStart); err != nil {
+				_ = response.Body.Close()
+				return offset, totalSize, fmt.Errorf("seek restarted partial file: %w", err)
+			}
+			if err := engine.store.ResetDownloadProgress(ctx, download.ID, engine.now()); err != nil {
+				_ = response.Body.Close()
+				return offset, totalSize, err
+			}
+			offset = responseOffset
+		}
+		totalSize = responseTotal
+		etag := response.Header.Get("ETag")
+		if etag == "" {
+			etag = metadata.ETag
+		}
+		lastModified := response.Header.Get("Last-Modified")
+		if lastModified == "" {
+			lastModified = metadata.LastModified
+		}
+		if err := engine.store.UpdateRemoteMetadata(
+			ctx,
+			download.ID,
+			totalSize,
+			metadata.RangeSupported || response.StatusCode == http.StatusPartialContent,
+			etag,
+			lastModified,
+			engine.now(),
+		); err != nil {
+			_ = response.Body.Close()
+			return offset, totalSize, err
+		}
+		if resolving {
+			if err := engine.store.UpdateDownloadStatus(ctx, download.ID, model.StatusDownloading, engine.now(), ""); err != nil {
+				_ = response.Body.Close()
+				return offset, totalSize, err
+			}
+			resolving = false
+		}
+		start := offset
+		downloaded, transferError := engine.copy(ctx, download.ID, partial, response.Body, offset, limiter)
+		closeError := response.Body.Close()
+		if transferError == nil && response.ContentLength >= 0 && downloaded-start != response.ContentLength {
+			transferError = io.ErrUnexpectedEOF
+		}
+		if transferError == nil && totalSize >= 0 && downloaded != totalSize {
+			transferError = io.ErrUnexpectedEOF
+		}
+		transferError = errors.Join(transferError, closeError)
+		if transferError == nil {
+			return downloaded, totalSize, nil
+		}
+		offset = downloaded
+		if !retryableHTTPError(ctx, transferError) || attempt+1 == engine.retry.attempts {
+			return offset, totalSize, transferError
+		}
+		if err := engine.retry.wait(ctx, engine.retry.delay(attempt, "")); err != nil {
+			return offset, totalSize, err
+		}
+	}
+	return offset, totalSize, io.ErrUnexpectedEOF
 }
 
 func (engine *Engine) preparePaths(download model.Download) (int64, string, error) {

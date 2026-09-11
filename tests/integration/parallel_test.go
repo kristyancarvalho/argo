@@ -82,7 +82,7 @@ func TestParallelWorkerFailureCancelsOtherWorkers(t *testing.T) {
 			for count := 0; count < 3; count++ {
 				<-peersStarted
 			}
-			http.Error(response, "worker failed", http.StatusServiceUnavailable)
+			http.Error(response, "worker failed", http.StatusBadRequest)
 			return
 		}
 		peersStarted <- struct{}{}
