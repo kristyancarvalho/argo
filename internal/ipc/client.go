@@ -175,6 +175,9 @@ func (client *Client) downloadAction(
 
 func (client *Client) Call(ctx context.Context, operation Operation, payload any, result any) error {
 	if err := unixsocket.Validate(filepath.Dir(client.SocketPath)); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return DaemonUnavailableError{Err: err}
+		}
 		return fmt.Errorf("validate daemon socket directory: %w", err)
 	}
 	requestID, err := newRequestID()
@@ -195,7 +198,7 @@ func (client *Client) Call(ctx context.Context, operation Operation, payload any
 	dialer := net.Dialer{Timeout: client.Timeout}
 	connection, err := dialer.DialContext(ctx, "unix", client.SocketPath)
 	if err != nil {
-		return fmt.Errorf("connect to daemon: %w", err)
+		return DaemonUnavailableError{Err: err}
 	}
 	defer func() {
 		_ = connection.Close()
@@ -267,6 +270,18 @@ func (client *Client) Call(ctx context.Context, operation Operation, payload any
 	}
 
 	return nil
+}
+
+type DaemonUnavailableError struct {
+	Err error
+}
+
+func (err DaemonUnavailableError) Error() string {
+	return fmt.Sprintf("daemon unavailable: %s", err.Err)
+}
+
+func (err DaemonUnavailableError) Unwrap() error {
+	return err.Err
 }
 
 func newRequestID() (string, error) {

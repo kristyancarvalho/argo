@@ -1,6 +1,7 @@
 package e2e_test
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,6 +30,36 @@ func TestHelpDoesNotRequireDaemon(t *testing.T) {
 		}
 		if !strings.Contains(string(output), "Traffic policies:") || !strings.Contains(string(output), "priority") {
 			t.Fatalf("argo %s returned incomplete help: %q", argument, output)
+		}
+	}
+}
+
+func TestCLIUsesStableUsageAndDaemonUnavailableExitCodes(t *testing.T) {
+	workingDirectory, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Clean(filepath.Join(workingDirectory, "..", ".."))
+	binary := filepath.Join(t.TempDir(), "argo")
+	build := exec.Command("go", "build", "-o", binary, "./cmd/argo")
+	build.Dir = root
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build argo: %v: %s", err, output)
+	}
+	runtimeDirectory := t.TempDir()
+	for _, test := range []struct {
+		arguments []string
+		code      int
+	}{
+		{[]string{"unknown"}, 2},
+		{[]string{"status"}, 3},
+	} {
+		command := exec.Command(binary, test.arguments...)
+		command.Env = append(os.Environ(), "XDG_RUNTIME_DIR="+runtimeDirectory)
+		output, err := command.CombinedOutput()
+		var exitError *exec.ExitError
+		if !errors.As(err, &exitError) || exitError.ExitCode() != test.code {
+			t.Fatalf("argo %v returned %v, expected exit %d: %s", test.arguments, err, test.code, output)
 		}
 	}
 }

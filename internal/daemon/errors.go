@@ -48,3 +48,15 @@ func (err UnknownProfileError) Error() string {
 func (err UnknownProfileError) Code() string {
 	return "unknown_profile"
 }
+
+type PolicyUnavailableError struct {
+	Reason string
+}
+
+func (err PolicyUnavailableError) Error() string {
+	return fmt.Sprintf("traffic policy is unavailable: %s", err.Reason)
+}
+
+func (err PolicyUnavailableError) Code() string {
+	return "policy_unavailable"
+}

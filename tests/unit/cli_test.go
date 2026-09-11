@@ -3,6 +3,7 @@ package unit_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -341,6 +342,79 @@ func TestCLICommands(t *testing.T) {
 	}
 }
 
+func TestCLIJSONCommandsProduceVersionedPlainDocuments(t *testing.T) {
+	tests := []struct {
+		arguments []string
+		kind      string
+		call      string
+	}{
+		{[]string{"list", "--json"}, "download_list", "list"},
+		{[]string{"show", "download-id", "--json"}, "download", "show:download-id"},
+		{[]string{"status", "--json"}, "daemon_status", "status"},
+	}
+	for _, test := range tests {
+		t.Run(test.kind, func(t *testing.T) {
+			client := &cliClient{}
+			var output bytes.Buffer
+			if err := cli.RunWithOptions(
+				context.Background(), client, &output, test.arguments, cli.Options{Color: true},
+			); err != nil {
+				t.Fatal(err)
+			}
+			if client.called != test.call {
+				t.Fatalf("called %q, expected %q", client.called, test.call)
+			}
+			var document struct {
+				SchemaVersion int             `json:"schema_version"`
+				Kind          string          `json:"kind"`
+				Data          json.RawMessage `json:"data"`
+			}
+			if err := json.Unmarshal(output.Bytes(), &document); err != nil {
+				t.Fatalf("decode JSON output %q: %v", output.String(), err)
+			}
+			if document.SchemaVersion != cli.JSONSchemaVersion || document.Kind != test.kind || len(document.Data) == 0 {
+				t.Fatalf("unexpected JSON document: %+v", document)
+			}
+			if strings.Contains(output.String(), "\x1b[") {
+				t.Fatalf("JSON output contains terminal styling: %q", output.String())
+			}
+		})
+	}
+}
+
+func TestCLIJSONOutputRedactsSecrets(t *testing.T) {
+	client := &secretShowClient{cliClient: &cliClient{}}
+	var output bytes.Buffer
+	if err := cli.Run(context.Background(), client, &output, []string{"show", "secret", "--json"}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(output.String(), "password") || strings.Contains(output.String(), "token=secret") ||
+		!strings.Contains(output.String(), "redacted@example.test") {
+		t.Fatalf("JSON output exposed secrets: %q", output.String())
+	}
+}
+
+func TestCLIStableExitCodes(t *testing.T) {
+	tests := []struct {
+		err  error
+		code int
+	}{
+		{nil, cli.ExitSuccess},
+		{cli.UsageError{Message: "bad usage"}, cli.ExitUsage},
+		{ipc.DaemonUnavailableError{Err: errors.New("missing socket")}, cli.ExitDaemonUnavailable},
+		{ipc.RemoteError{Code: "not_found", Message: "missing"}, cli.ExitItemNotFound},
+		{ipc.RemoteError{Code: "network_failure", Message: "offline"}, cli.ExitNetworkFailure},
+		{ipc.RemoteError{Code: "policy_unavailable", Message: "helper missing"}, cli.ExitPolicyUnavailable},
+		{ipc.RemoteError{Code: "invalid_request", Message: "bad"}, cli.ExitUsage},
+		{errors.New("unexpected"), cli.ExitGeneralFailure},
+	}
+	for _, test := range tests {
+		if code := cli.ExitCode(test.err); code != test.code {
+			t.Errorf("ExitCode(%v) = %d, expected %d", test.err, code, test.code)
+		}
+	}
+}
+
 func TestCLIRejectsInvalidArguments(t *testing.T) {
 	tests := [][]string{
 		nil,
@@ -350,6 +424,10 @@ func TestCLIRejectsInvalidArguments(t *testing.T) {
 		{"add", "--checksum"},
 		{"add", "--checksum", "one", "--checksum", "two", "url"},
 		{"list", "extra"},
+		{"list", "--json", "--json"},
+		{"show", "--json"},
+		{"show", "--unknown"},
+		{"policy", "off", "--json"},
 		{"show"},
 		{"pause"},
 		{"resume"},
