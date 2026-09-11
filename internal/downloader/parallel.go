@@ -149,69 +149,92 @@ func (engine *Engine) downloadChunk(
 	limiter *rateLimiter,
 	tracker *progressTracker,
 ) error {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, download.URL, nil)
-	if err != nil {
-		return fmt.Errorf("create request for chunk %d: %w", chunk.Index, err)
-	}
-	requestStart := chunk.Start + downloaded
-	request.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", requestStart, chunk.End))
-	bindRepresentation(request, metadata)
-	response, err := engine.httpClient.Do(request)
-	if err != nil {
-		return fmt.Errorf("request chunk %d: %w", chunk.Index, err)
-	}
-	defer func() {
-		_ = response.Body.Close()
-	}()
-	if err := validateRepresentation(response, metadata); err != nil {
-		return err
-	}
-	if response.StatusCode != http.StatusPartialContent {
-		return HTTPStatusError{StatusCode: response.StatusCode, Status: response.Status}
-	}
-	contentRange := response.Header.Get("Content-Range")
-	start, end, responseTotal, err := parseContentRange(contentRange)
-	if err != nil || start != requestStart || end != chunk.End || responseTotal != metadata.TotalSize {
-		return RangeMismatchError{Chunk: chunk, ContentRange: contentRange}
-	}
-
 	buffer := make([]byte, copyBufferSize)
-	for {
-		remaining := chunk.Size() - downloaded
-		readLimit := int64(len(buffer))
-		if remaining < readLimit {
-			readLimit = remaining + 1
+	for attempt := 0; attempt < engine.retry.attempts; attempt++ {
+		requestStart := chunk.Start + downloaded
+		response, err := engine.retry.do(ctx, func() (*http.Request, error) {
+			request, err := http.NewRequestWithContext(ctx, http.MethodGet, download.URL, nil)
+			if err != nil {
+				return nil, fmt.Errorf("create request for chunk %d: %w", chunk.Index, err)
+			}
+			request.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", requestStart, chunk.End))
+			bindRepresentation(request, metadata)
+			return request, nil
+		}, engine.httpClient)
+		if err != nil {
+			return fmt.Errorf("request chunk %d: %w", chunk.Index, err)
 		}
-		read, readError := response.Body.Read(buffer[:readLimit])
-		if int64(read) > remaining {
+		if err := validateRepresentation(response, metadata); err != nil {
+			_ = response.Body.Close()
+			return err
+		}
+		if response.StatusCode != http.StatusPartialContent {
+			_ = response.Body.Close()
+			return HTTPStatusError{StatusCode: response.StatusCode, Status: response.Status}
+		}
+		contentRange := response.Header.Get("Content-Range")
+		start, end, responseTotal, err := parseContentRange(contentRange)
+		if err != nil || start != requestStart || end != chunk.End || responseTotal != metadata.TotalSize {
+			_ = response.Body.Close()
 			return RangeMismatchError{Chunk: chunk, ContentRange: contentRange}
 		}
-		if read > 0 {
-			if err := limiter.Wait(ctx, read); err != nil {
-				return err
+
+		var transferError error
+		for {
+			remaining := chunk.Size() - downloaded
+			readLimit := int64(len(buffer))
+			if remaining < readLimit {
+				readLimit = remaining + 1
 			}
-			written, writeError := destination.WriteAt(buffer[:read], chunk.Start+downloaded)
-			if writeError != nil {
-				return fmt.Errorf("write chunk %d: %w", chunk.Index, writeError)
+			read, readError := response.Body.Read(buffer[:readLimit])
+			if int64(read) > remaining {
+				transferError = RangeMismatchError{Chunk: chunk, ContentRange: contentRange}
+				break
 			}
-			if written != read {
-				return io.ErrShortWrite
+			if read > 0 {
+				if err := limiter.Wait(ctx, read); err != nil {
+					transferError = err
+					break
+				}
+				written, writeError := destination.WriteAt(buffer[:read], chunk.Start+downloaded)
+				if writeError != nil {
+					transferError = fmt.Errorf("write chunk %d: %w", chunk.Index, writeError)
+					break
+				}
+				if written != read {
+					transferError = io.ErrShortWrite
+					break
+				}
+				downloaded += int64(written)
+				if err := tracker.Add(ctx, chunk, int64(written)); err != nil {
+					transferError = err
+					break
+				}
 			}
-			downloaded += int64(written)
-			if err := tracker.Add(ctx, chunk, int64(written)); err != nil {
-				return err
+			if errors.Is(readError, io.EOF) {
+				if downloaded != chunk.Size() {
+					transferError = io.ErrUnexpectedEOF
+				}
+				break
+			}
+			if readError != nil {
+				transferError = fmt.Errorf("read chunk %d: %w", chunk.Index, readError)
+				break
 			}
 		}
-		if errors.Is(readError, io.EOF) {
-			if downloaded != chunk.Size() {
-				return io.ErrUnexpectedEOF
-			}
+		closeError := response.Body.Close()
+		transferError = errors.Join(transferError, closeError)
+		if transferError == nil {
 			return nil
 		}
-		if readError != nil {
-			return fmt.Errorf("read chunk %d: %w", chunk.Index, readError)
+		if !retryableHTTPError(ctx, transferError) || attempt+1 == engine.retry.attempts {
+			return transferError
+		}
+		if err := engine.retry.wait(ctx, engine.retry.delay(attempt, "")); err != nil {
+			return err
 		}
 	}
+	return io.ErrUnexpectedEOF
 }
 
 func newProgressTracker(engine *Engine, downloadID model.DownloadID, chunks []model.DownloadChunk, file *os.File) *progressTracker {
