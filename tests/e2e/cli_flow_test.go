@@ -5,6 +5,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -174,6 +176,31 @@ func TestCLIBasicDownloadFlow(t *testing.T) {
 	}
 	if !strings.Contains(listOutput, identifier) || !strings.Contains(listOutput, "completed") {
 		t.Fatalf("unexpected list output %q", listOutput)
+	}
+	jsonOutput, err := executeCLI(ctx, argoBinary, invocationDirectory, environment, "list", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document struct {
+		SchemaVersion int    `json:"schema_version"`
+		Kind          string `json:"kind"`
+		Data          struct {
+			Downloads []struct {
+				ID string `json:"id"`
+			} `json:"downloads"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(jsonOutput), &document); err != nil {
+		t.Fatalf("decode list JSON %q: %v", jsonOutput, err)
+	}
+	if document.SchemaVersion != 1 || document.Kind != "download_list" || len(document.Data.Downloads) != 1 || document.Data.Downloads[0].ID != identifier {
+		t.Fatalf("unexpected list JSON: %+v", document)
+	}
+	missingID := strings.Repeat("0", 32)
+	missingOutput, err := executeCLI(ctx, argoBinary, invocationDirectory, environment, "show", missingID, "--json")
+	var exitError *exec.ExitError
+	if !errors.As(err, &exitError) || exitError.ExitCode() != 4 || !strings.Contains(missingOutput, "not_found") {
+		t.Fatalf("missing item returned %v: %q", err, missingOutput)
 	}
 	verifyOutput, err := executeCLI(ctx, argoBinary, invocationDirectory, environment, "verify", identifier)
 	if err != nil || !strings.Contains(verifyOutput, "Verified "+identifier) || !strings.Contains(verifyOutput, checksum) {

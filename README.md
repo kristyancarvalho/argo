@@ -180,8 +180,8 @@ Downloads continue after the client exits. Unless configured otherwise, the comp
 | Command | Purpose |
 | --- | --- |
 | `argo add [--checksum sha256:<hex>] <url>` | Add a new HTTP or HTTPS transfer with optional integrity validation |
-| `argo list` | List downloads and history |
-| `argo show <id>` | Show complete transfer details |
+| `argo list [--json]` | List downloads and history, optionally as versioned JSON |
+| `argo show <id> [--json]` | Show complete transfer details, optionally as versioned JSON |
 | `argo pause <id>` | Pause queued or active work |
 | `argo resume <id>` | Continue valid partial state with the same ID |
 | `argo cancel <id>` | Cancel a transfer while preserving resumable data when valid |
@@ -191,13 +191,25 @@ Downloads continue after the client exits. Unless configured otherwise, the comp
 | `argo verify <id>` | Recheck a completed file against its stored checksum |
 | `argo priority <id> <level>` | Set queued priority to `low`, `normal`, or `high` |
 | `argo watch` | Redraw live progress in a TTY, or print one snapshot when piped |
-| `argo status` | Show daemon, network, profile, and QoS state |
+| `argo status [--json]` | Show daemon, network, profile, and QoS state, optionally as versioned JSON |
 | `argo policy <name>` | Select `off`, `focus`, `balanced`, `throughput`, or `latency` |
 | `argo profile <name>` | Activate a configured profile |
 | `argo tui` | Open the interactive terminal interface |
 | `argo help` | Show built-in command help |
 
 `argo --help` and `argo -h` are also supported. Set `NO_COLOR=1` to disable color in terminal output.
+
+Machine-readable output uses an envelope containing `schema_version`, `kind`, and `data`. Schema version `1` is available for `list`, `show`, and `status`; it never includes ANSI styling and redacts credentials and query values from source URLs and diagnostics.
+
+| Exit code | Meaning |
+| ---: | --- |
+| `0` | Success |
+| `1` | General failure |
+| `2` | Usage or invalid request |
+| `3` | Daemon unavailable |
+| `4` | Download not found |
+| `5` | Network failure |
+| `6` | Traffic policy unavailable |
 
 ## Configuration
 

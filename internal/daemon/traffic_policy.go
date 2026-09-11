@@ -21,10 +21,10 @@ func (service *Service) setTrafficPolicy(
 	}
 	policy, err := qos.ParsePolicy(request.Policy)
 	if err != nil {
-		return ipc.PolicyResponse{}, err
+		return ipc.PolicyResponse{}, InvalidDownloadActionError{Action: "policy", Reason: err.Error()}
 	}
 	if policy == qos.PolicyLatency && service.currentLatencyPolicy() == nil {
-		return ipc.PolicyResponse{}, fmt.Errorf("latency policy is not configured")
+		return ipc.PolicyResponse{}, PolicyUnavailableError{Reason: "latency policy is not configured"}
 	}
 	service.profileMutex.Lock()
 	previous := service.trafficPolicy
@@ -36,7 +36,7 @@ func (service *Service) setTrafficPolicy(
 		service.profileMutex.Unlock()
 		_ = service.reconcileTrafficPolicy(context.WithoutCancel(ctx))
 		service.setTrafficError(err)
-		return ipc.PolicyResponse{}, err
+		return ipc.PolicyResponse{}, PolicyUnavailableError{Reason: err.Error()}
 	}
 	applied := false
 	if service.trafficController != nil {

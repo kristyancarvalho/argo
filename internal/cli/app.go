@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/kristyancarvalho/argo/internal/diagnostic"
@@ -34,15 +35,19 @@ func Run(ctx context.Context, client Client, output io.Writer, arguments []strin
 }
 
 func RunWithOptions(ctx context.Context, client Client, output io.Writer, arguments []string, options Options) error {
-	terminalOutput := output
-	if options.Color {
-		output = styledWriter{output: output}
-	}
 	if len(arguments) == 0 {
 		return UsageError{Message: "command is required"}
 	}
 	command := arguments[0]
 	operands := arguments[1:]
+	jsonOutput, operands, err := parseJSONOutput(command, operands)
+	if err != nil {
+		return err
+	}
+	terminalOutput := output
+	if options.Color && !jsonOutput {
+		output = styledWriter{output: output}
+	}
 
 	switch command {
 	case "help", "-h", "--help":
@@ -50,9 +55,9 @@ func RunWithOptions(ctx context.Context, client Client, output io.Writer, argume
 	case "add":
 		return runAdd(ctx, client, output, operands)
 	case "list":
-		return runList(ctx, client, output, operands)
+		return runList(ctx, client, output, operands, jsonOutput)
 	case "show":
-		return runShow(ctx, client, output, operands)
+		return runShow(ctx, client, output, operands, jsonOutput)
 	case "pause":
 		return runAction(ctx, client.Pause, output, command, operands)
 	case "resume":
@@ -72,7 +77,7 @@ func RunWithOptions(ctx context.Context, client Client, output io.Writer, argume
 	case "watch":
 		return runWatch(ctx, client, output, terminalOutput, operands, options)
 	case "status":
-		return runStatus(ctx, client, output, operands)
+		return runStatus(ctx, client, output, operands, jsonOutput)
 	case "profile":
 		return runProfile(ctx, client, output, operands)
 	case "policy":
@@ -94,8 +99,8 @@ Usage:
 Commands:
   add [--checksum sha256:<hex>] <url>
                                     Add a download
-  list                              List downloads
-  show <id>                         Show download details
+  list [--json]                     List downloads
+  show <id> [--json]                Show download details
   pause <id>                        Pause a download
   resume <id>                       Resume a download
   cancel <id>                       Cancel a download
@@ -105,7 +110,7 @@ Commands:
   verify <id>                       Verify a completed download
   priority <id> <low|normal|high>   Order queued Argo downloads
   watch                             Stream download progress
-  status                            Show daemon, network, and QoS state
+  status [--json]                   Show daemon, network, and QoS state
   policy <name>                     Select a system traffic policy
   profile <name>                    Activate a configured profile
   tui                               Open the terminal interface
@@ -247,13 +252,21 @@ func runRetry(ctx context.Context, client Client, output io.Writer, arguments []
 	return err
 }
 
-func runList(ctx context.Context, client Client, output io.Writer, arguments []string) error {
+func runList(ctx context.Context, client Client, output io.Writer, arguments []string, jsonOutput bool) error {
 	if len(arguments) != 0 {
 		return UsageError{Message: "argo list"}
 	}
 	downloads, err := client.List(ctx)
 	if err != nil {
 		return err
+	}
+	if jsonOutput {
+		for index := range downloads {
+			downloads[index] = safeJSONDownload(downloads[index])
+		}
+		return WriteJSON(output, "download_list", struct {
+			Downloads []ipc.Download `json:"downloads"`
+		}{Downloads: downloads})
 	}
 	writer := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
 	if _, err := fmt.Fprintln(writer, "ID\tSTATUS\tPROGRESS\tFILENAME"); err != nil {
@@ -275,13 +288,16 @@ func runList(ctx context.Context, client Client, output io.Writer, arguments []s
 	return writer.Flush()
 }
 
-func runShow(ctx context.Context, client Client, output io.Writer, arguments []string) error {
+func runShow(ctx context.Context, client Client, output io.Writer, arguments []string, jsonOutput bool) error {
 	if len(arguments) != 1 {
 		return UsageError{Message: "argo show <id>"}
 	}
 	download, err := client.Show(ctx, arguments[0])
 	if err != nil {
 		return err
+	}
+	if jsonOutput {
+		return WriteJSON(output, "download", safeJSONDownload(download))
 	}
 	_, err = fmt.Fprintf(
 		output,
@@ -366,13 +382,16 @@ func runPriority(ctx context.Context, client Client, output io.Writer, arguments
 	return err
 }
 
-func runStatus(ctx context.Context, client Client, output io.Writer, arguments []string) error {
+func runStatus(ctx context.Context, client Client, output io.Writer, arguments []string, jsonOutput bool) error {
 	if len(arguments) != 0 {
 		return UsageError{Message: "argo status"}
 	}
 	status, err := client.Status(ctx)
 	if err != nil {
 		return err
+	}
+	if jsonOutput {
+		return WriteJSON(output, "daemon_status", safeJSONStatus(status))
 	}
 	networkState := status.Network.State
 	if !status.Network.Available {
@@ -446,6 +465,36 @@ func runStatus(ctx context.Context, client Client, output io.Writer, arguments [
 	}
 
 	return err
+}
+
+func parseJSONOutput(command string, arguments []string) (bool, []string, error) {
+	jsonOutput := false
+	operands := make([]string, 0, len(arguments))
+	for _, argument := range arguments {
+		if argument != "--json" {
+			operands = append(operands, argument)
+			continue
+		}
+		if jsonOutput {
+			return false, nil, UsageError{Message: "--json may only be specified once"}
+		}
+		jsonOutput = true
+	}
+	if jsonOutput {
+		switch command {
+		case "list", "show", "status":
+		default:
+			return false, nil, UsageError{Message: "--json is supported by list, show, and status"}
+		}
+	}
+	if command == "list" || command == "show" || command == "status" {
+		for _, operand := range operands {
+			if strings.HasPrefix(operand, "-") {
+				return false, nil, UsageError{Message: fmt.Sprintf("unknown option %q for argo %s", operand, command)}
+			}
+		}
+	}
+	return jsonOutput, operands, nil
 }
 
 func statusValue(value string) string {

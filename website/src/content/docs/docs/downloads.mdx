@@ -69,3 +69,25 @@ argo tui
 The TUI is another client of `argod`. It lists downloads, keeps selection visible, shows full selected details, reports network and policy state, and exposes add, pause, resume, cancel, retry, remove, clear, priority, profile, and policy actions. Press `?` for its current key reference. Leaving the TUI does not stop downloads.
 
 Set `NO_COLOR=1` to disable ANSI color in ordinary CLI output.
+
+## Machine-readable output
+
+`list`, `show`, and `status` accept `--json`:
+
+```sh
+argo list --json
+argo show <id> --json
+argo status --json
+```
+
+The output is a JSON document with `schema_version`, `kind`, and `data`. Schema version `1` contains the current typed command result, emits no terminal styling, and redacts credentials and query values from URLs and diagnostic messages.
+
+| Exit code | Meaning                    |
+| --------: | -------------------------- |
+|         0 | Success                    |
+|         1 | General failure            |
+|         2 | Usage or invalid request   |
+|         3 | Daemon unavailable         |
+|         4 | Download not found         |
+|         5 | Network failure            |
+|         6 | Traffic policy unavailable |
