@@ -9,6 +9,7 @@ import (
 
 	"github.com/kristyancarvalho/argo/internal/cli"
 	"github.com/kristyancarvalho/argo/internal/console"
+	"github.com/kristyancarvalho/argo/internal/doctor"
 	"github.com/kristyancarvalho/argo/internal/ipc"
 	"github.com/kristyancarvalho/argo/internal/tui"
 )
@@ -39,6 +40,7 @@ func run(arguments []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	client := ipc.NewClient(socketPath)
+	diagnostics := doctor.NewDefault(client)
 	if len(arguments) > 0 && arguments[0] == "tui" {
 		if len(arguments) != 1 {
 			return cli.UsageError{Message: "argo tui"}
@@ -48,6 +50,6 @@ func run(arguments []string) error {
 	}
 
 	return cli.RunWithOptions(ctx, client, os.Stdout, arguments, cli.Options{
-		Color: console.Enabled(os.Stdout), Interactive: console.Terminal(os.Stdout),
+		Color: console.Enabled(os.Stdout), Interactive: console.Terminal(os.Stdout), Doctor: diagnostics.Run,
 	})
 }

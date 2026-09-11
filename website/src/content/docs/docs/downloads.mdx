@@ -28,6 +28,7 @@ argo retry <id>
 argo verify <id>
 argo remove <id>
 argo clear
+argo doctor
 ```
 
 A canceled download can resume only when valid partial state still exists and the remote resource supports a safe continuation. Argo checks Range behavior plus available ETag or Last-Modified validators before appending. If those checks fail, use `retry` for a clean transfer.
@@ -72,12 +73,13 @@ Set `NO_COLOR=1` to disable ANSI color in ordinary CLI output.
 
 ## Machine-readable output
 
-`list`, `show`, and `status` accept `--json`:
+`list`, `show`, `status`, and `doctor` accept `--json`:
 
 ```sh
 argo list --json
 argo show <id> --json
 argo status --json
+argo doctor --json
 ```
 
 The output is a JSON document with `schema_version`, `kind`, and `data`. Schema version `1` contains the current typed command result, emits no terminal styling, and redacts credentials and query values from URLs and diagnostic messages.

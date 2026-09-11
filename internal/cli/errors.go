@@ -21,6 +21,14 @@ type UsageError struct {
 	Message string
 }
 
+type DoctorError struct {
+	DaemonUnavailable bool
+}
+
+func (err DoctorError) Error() string {
+	return "doctor found unavailable core capabilities"
+}
+
 func (err UsageError) Error() string {
 	return fmt.Sprintf("usage error: %s", err.Message)
 }
@@ -36,6 +44,13 @@ func ExitCode(err error) int {
 	var unavailable ipc.DaemonUnavailableError
 	if errors.As(err, &unavailable) {
 		return ExitDaemonUnavailable
+	}
+	var doctor DoctorError
+	if errors.As(err, &doctor) {
+		if doctor.DaemonUnavailable {
+			return ExitDaemonUnavailable
+		}
+		return ExitGeneralFailure
 	}
 	var remote ipc.RemoteError
 	if errors.As(err, &remote) {
