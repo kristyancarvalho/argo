@@ -36,11 +36,14 @@ go test ./tests/integration -run '^$' -bench BenchmarkDownloadCheckpointThroughp
 
 Compare repeated runs on the same temporary filesystem and under similar machine load. A tmpfs result is not a persistent-disk benchmark, and loopback throughput is not a WAN prediction.
 
+The repository also includes an opt-in HTTP transport campaign under `benchmarks/http-transport`. It compares verified HTTP/1.1 and HTTP/2 behavior in a disposable network namespace with controlled latency, packet loss, per-connection throttling, connection counts, and checksum validation. Its committed report records the exact command, environment, raw timing ranges, profiles, and bounded tuning decision.
+
 ## Repository layout
 
 | Path                 | Purpose                                                    |
 | -------------------- | ---------------------------------------------------------- |
 | `cmd/`               | Entry points for `argo`, `argod`, and `argo-qosd`          |
+| `benchmarks/`        | Reproducible benchmark methods and recorded evidence       |
 | `internal/`          | Private application packages and subsystem implementations |
 | `tests/unit/`        | Focused component and repository-contract tests            |
 | `tests/integration/` | Cross-component behavior tests                             |
