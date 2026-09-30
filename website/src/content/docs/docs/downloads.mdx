@@ -1,6 +1,6 @@
 ---
 title: Download lifecycle and terminal tools
-description: Add, inspect, pause, resume, retry, prioritize, watch, and remove Argo transfers.
+description: Add, verify, inspect, pause, resume, retry, prioritize, watch, and remove Argo transfers.
 ---
 
 ## Historical identity
@@ -18,19 +18,24 @@ Every request receives a new download ID. A completed record remains immutable h
 
 ```sh
 argo add https://example.org/archive.iso
+argo add --checksum sha256:<64-hex-digits> https://example.org/archive.iso
 argo list
 argo show <id>
 argo pause <id>
 argo resume <id>
 argo cancel <id>
 argo retry <id>
+argo verify <id>
 argo remove <id>
 argo clear
+argo doctor
 ```
 
 A canceled download can resume only when valid partial state still exists and the remote resource supports a safe continuation. Argo checks Range behavior plus available ETag or Last-Modified validators before appending. If those checks fail, use `retry` for a clean transfer.
 
 Active downloads cannot be silently removed. Completed files are never deleted by `remove` or `clear`.
+
+When a SHA-256 checksum is supplied, Argo syncs the partial data, enters `verifying`, and compares the complete transfer before final placement. A mismatch becomes a failed, recoverable history record and is never published as a completed file. `verify <id>` rechecks an existing completed file, while `retry <id>` preserves the original checksum on the new transfer.
 
 ## Progress and recovery
 
@@ -65,3 +70,26 @@ argo tui
 The TUI is another client of `argod`. It lists downloads, keeps selection visible, shows full selected details, reports network and policy state, and exposes add, pause, resume, cancel, retry, remove, clear, priority, profile, and policy actions. Press `?` for its current key reference. Leaving the TUI does not stop downloads.
 
 Set `NO_COLOR=1` to disable ANSI color in ordinary CLI output.
+
+## Machine-readable output
+
+`list`, `show`, `status`, and `doctor` accept `--json`:
+
+```sh
+argo list --json
+argo show <id> --json
+argo status --json
+argo doctor --json
+```
+
+The output is a JSON document with `schema_version`, `kind`, and `data`. Schema version `1` contains the current typed command result, emits no terminal styling, and redacts credentials and query values from URLs and diagnostic messages.
+
+| Exit code | Meaning                    |
+| --------: | -------------------------- |
+|         0 | Success                    |
+|         1 | General failure            |
+|         2 | Usage or invalid request   |
+|         3 | Daemon unavailable         |
+|         4 | Download not found         |
+|         5 | Network failure            |
+|         6 | Traffic policy unavailable |

@@ -41,6 +41,8 @@ If the destination filename already exists, Argo chooses a predictable sibling s
 
 Download `rate_limit` values are bytes per second. QoS link and adaptive rate values are bits per second. `K`, `M`, and `G` are decimal suffixes; `0` means unlimited where documented.
 
+The `latency` and `background` policies use `latency_target`, `min_rate`, `max_rate`, `probe_target`, `probe_timeout`, `sample_interval`, and `manual_baseline`. Background starts at `min_rate` whenever it is activated; latency starts at `max_rate`.
+
 Concurrency and chunk counts must be positive. The scheduler bounds active downloads, and the download engine bounds Range workers per transfer.
 
 ## Profiles

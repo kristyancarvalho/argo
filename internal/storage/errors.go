@@ -1,11 +1,18 @@
 package storage
 
-import (
-	"errors"
-	"fmt"
-)
+import "fmt"
 
-var ErrDownloadNotFound = errors.New("download not found")
+var ErrDownloadNotFound error = downloadNotFoundError{}
+
+type downloadNotFoundError struct{}
+
+func (downloadNotFoundError) Error() string {
+	return "download not found"
+}
+
+func (downloadNotFoundError) Code() string {
+	return "not_found"
+}
 
 type SchemaTooNewError struct {
 	Found     int

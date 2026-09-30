@@ -54,6 +54,12 @@ func (policy *LatencyPolicy) Observe(snapshot telemetry.Snapshot) AdaptiveState 
 	return policy.lastState
 }
 
+func (policy *LatencyPolicy) ObserveBaseline(snapshot telemetry.Snapshot) {
+	policy.mutex.Lock()
+	defer policy.mutex.Unlock()
+	policy.baseline.Observe(snapshot)
+}
+
 func (policy *LatencyPolicy) Diagnostics(now time.Time) LatencyDiagnostics {
 	policy.mutex.Lock()
 	defer policy.mutex.Unlock()
@@ -79,7 +85,23 @@ func (policy *LatencyPolicy) Current() AdaptiveState {
 	return policy.controller.Current()
 }
 
+func (policy *LatencyPolicy) Reset() AdaptiveState {
+	policy.mutex.Lock()
+	defer policy.mutex.Unlock()
+	policy.lastSample = telemetry.Snapshot{}
+	policy.lastState = policy.controller.Reset()
+
+	return policy.lastState
+}
+
 func MapAdaptivePolicy(environment PolicyEnvironment, rate uint64) (DesiredState, error) {
+	return MapAdaptivePolicyFor(PolicyLatency, environment, rate)
+}
+
+func MapAdaptivePolicyFor(policy Policy, environment PolicyEnvironment, rate uint64) (DesiredState, error) {
+	if policy != PolicyLatency && policy != PolicyBackground {
+		return DesiredState{}, fmt.Errorf("policy %q is not adaptive", policy)
+	}
 	if environment.ActiveDownloads == 0 {
 		return DesiredState{Policy: PolicyOff}, nil
 	}
@@ -94,7 +116,7 @@ func MapAdaptivePolicy(environment PolicyEnvironment, rate uint64) (DesiredState
 	}
 	state := DesiredState{
 		Enabled:               true,
-		Policy:                PolicyLatency,
+		Policy:                policy,
 		Interface:             environment.Interface,
 		LinkRateBitsPerSecond: environment.LinkRateBitsPerSecond,
 		ArgoRateBitsPerSecond: rate,

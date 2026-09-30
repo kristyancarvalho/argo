@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -39,6 +40,7 @@ const (
 	StatusQueued      Status = "queued"
 	StatusResolving   Status = "resolving"
 	StatusDownloading Status = "downloading"
+	StatusVerifying   Status = "verifying"
 	StatusPaused      Status = "paused"
 	StatusCompleted   Status = "completed"
 	StatusFailed      Status = "failed"
@@ -49,6 +51,7 @@ var statuses = []Status{
 	StatusQueued,
 	StatusResolving,
 	StatusDownloading,
+	StatusVerifying,
 	StatusPaused,
 	StatusCompleted,
 	StatusFailed,
@@ -69,6 +72,13 @@ var transitions = map[Status]map[Status]struct{}{
 		StatusCanceled:    {},
 	},
 	StatusDownloading: {
+		StatusVerifying: {},
+		StatusPaused:    {},
+		StatusCompleted: {},
+		StatusFailed:    {},
+		StatusCanceled:  {},
+	},
+	StatusVerifying: {
 		StatusPaused:    {},
 		StatusCompleted: {},
 		StatusFailed:    {},
@@ -154,7 +164,21 @@ type Download struct {
 	ETag            string
 	LastModified    string
 	RangeSupported  bool
+	Checksum        string
 	Error           string
+}
+
+func NormalizeChecksum(value string) (string, error) {
+	algorithm, digest, found := strings.Cut(strings.TrimSpace(value), ":")
+	if !found || !strings.EqualFold(algorithm, "sha256") {
+		return "", fmt.Errorf("checksum must use sha256:<64 hexadecimal characters>")
+	}
+	decoded, err := hex.DecodeString(digest)
+	if err != nil || len(decoded) != 32 {
+		return "", fmt.Errorf("checksum must use sha256:<64 hexadecimal characters>")
+	}
+
+	return "sha256:" + strings.ToLower(digest), nil
 }
 
 type DownloadChunk struct {

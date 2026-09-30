@@ -237,9 +237,13 @@ func measureRxPair(t *testing.T, address string, cgroup qos.CgroupSelector) (int
 }
 
 func startRxClient(t *testing.T, address string) (*exec.Cmd, io.WriteCloser, *bytes.Buffer) {
+	return startRxClientFor(t, address, rxMeasurementDuration)
+}
+
+func startRxClientFor(t *testing.T, address string, duration time.Duration) (*exec.Cmd, io.WriteCloser, *bytes.Buffer) {
 	t.Helper()
 	command := exec.Command(os.Args[0], "-test.run=^TestQoSRxTrafficShare$")
-	command.Env = append(os.Environ(), "ARGO_QOS_RX_CLIENT="+address)
+	command.Env = append(os.Environ(), "ARGO_QOS_RX_CLIENT="+address, "ARGO_QOS_RX_DURATION="+duration.String())
 	input, err := command.StdinPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -255,6 +259,14 @@ func startRxClient(t *testing.T, address string) (*exec.Cmd, io.WriteCloser, *by
 }
 
 func runRxClientWorker(t *testing.T, address string) {
+	duration := rxMeasurementDuration
+	if configured := os.Getenv("ARGO_QOS_RX_DURATION"); configured != "" {
+		parsed, err := time.ParseDuration(configured)
+		if err != nil || parsed <= 0 {
+			t.Fatalf("invalid RX measurement duration %q: %v", configured, err)
+		}
+		duration = parsed
+	}
 	var signal [1]byte
 	if _, err := os.Stdin.Read(signal[:]); err != nil {
 		t.Fatal(err)
@@ -266,7 +278,7 @@ func runRxClientWorker(t *testing.T, address string) {
 	defer func() {
 		_ = connection.Close()
 	}()
-	if err := connection.SetReadDeadline(time.Now().Add(rxMeasurementDuration)); err != nil {
+	if err := connection.SetReadDeadline(time.Now().Add(duration)); err != nil {
 		t.Fatal(err)
 	}
 	buffer := make([]byte, 64*1024)

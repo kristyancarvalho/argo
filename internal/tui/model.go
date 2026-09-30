@@ -307,7 +307,7 @@ func (model Model) View() string {
 		return model.boundView(view.String())
 	}
 	if model.mode == inputModePolicy {
-		view.WriteString(console.Paint(model.color, console.Cyan, "\nSelect traffic policy: 1 off  2 balanced  3 throughput  4 latency  5 focus  Esc cancel\n"))
+		view.WriteString(console.Paint(model.color, console.Cyan, "\nSelect traffic policy: 1 off  2 balanced  3 throughput  4 latency  5 focus  6 background  Esc cancel\n"))
 		return model.boundView(view.String())
 	}
 	if model.actionErr != nil {
@@ -392,7 +392,7 @@ func (model Model) compactView(width int) string {
 	case inputModeProfile:
 		contextLine = "Profile: " + diagnostic.Display(model.input)
 	case inputModePolicy:
-		contextLine = "Policy: 1 off 2 balanced 3 throughput 4 latency 5 focus"
+		contextLine = "Policy: 1 off 2 balanced 3 throughput 4 latency 5 focus 6 background"
 	case inputModeClear:
 		contextLine = "Clear history? y/N"
 	case inputModeCancel:
@@ -495,6 +495,9 @@ func (model Model) renderSelected(view *strings.Builder, width int) {
 	_, _ = fmt.Fprintf(view, "  ID: %s\n  State: %s    Priority: %s\n", diagnostic.Display(download.ID), diagnostic.Display(download.Status), diagnostic.Display(download.Priority))
 	_, _ = fmt.Fprintf(view, "  File: %s\n", truncateCells(diagnostic.Display(download.Filename), max(4, width-8)))
 	_, _ = fmt.Fprintf(view, "  Source: %s\n", truncateCells(diagnostic.Display(diagnostic.URL(download.URL)), max(4, width-10)))
+	if download.Checksum != "" {
+		_, _ = fmt.Fprintf(view, "  Checksum: %s\n", truncateCells(diagnostic.Display(download.Checksum), max(4, width-12)))
+	}
 }
 
 func (model Model) renderHelp(view *strings.Builder) {
@@ -628,7 +631,7 @@ func (model Model) updatePolicySelection(message tea.KeyMsg) (tea.Model, tea.Cmd
 		return model, nil
 	}
 	policies := map[string]string{
-		"1": "off", "2": "balanced", "3": "throughput", "4": "latency", "5": "focus",
+		"1": "off", "2": "balanced", "3": "throughput", "4": "latency", "5": "focus", "6": "background",
 	}
 	policy, exists := policies[message.String()]
 	if !exists {
@@ -926,6 +929,8 @@ func statusColor(status string) console.Code {
 		return console.Cyan
 	case "downloading":
 		return console.Blue
+	case "verifying":
+		return console.Magenta
 	case "paused":
 		return console.Yellow
 	case "failed", "canceled":

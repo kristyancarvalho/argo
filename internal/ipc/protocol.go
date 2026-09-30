@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-const ProtocolVersion = 1
+const ProtocolVersion = 2
 
 type Operation string
 
@@ -24,6 +24,7 @@ const (
 	OperationRemove   Operation = "remove"
 	OperationClear    Operation = "clear"
 	OperationRetry    Operation = "retry"
+	OperationVerify   Operation = "verify"
 )
 
 type Request struct {
@@ -49,6 +50,7 @@ type ResponseError struct {
 type AddRequest struct {
 	URL         string `json:"url"`
 	Destination string `json:"destination"`
+	Checksum    string `json:"checksum,omitempty"`
 }
 
 type AddResponse struct {
@@ -65,6 +67,12 @@ type DownloadActionRequest struct {
 type DownloadActionResponse struct {
 	ID     string `json:"id"`
 	Status string `json:"status"`
+}
+
+type VerifyResponse struct {
+	ID       string `json:"id"`
+	Checksum string `json:"checksum"`
+	Matched  bool   `json:"matched"`
 }
 
 type ClearResponse struct {
@@ -121,6 +129,7 @@ type Download struct {
 	Priority        string    `json:"priority"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
+	Checksum        string    `json:"checksum,omitempty"`
 	Error           string    `json:"error,omitempty"`
 }
 

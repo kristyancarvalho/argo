@@ -43,11 +43,13 @@ import Icon from "../Icon.astro";
       <div
         class="policy-scale"
         role="list"
-        aria-label="Available traffic policies: off, focus, balanced, throughput, latency"
+        aria-label="Available traffic policies: off, focus, balanced, throughput, latency, background"
       >
         <span role="listitem">off</span><span role="listitem">focus</span><span role="listitem"
           >balanced</span
-        ><span role="listitem">throughput</span><span role="listitem">latency</span>
+        ><span role="listitem">throughput</span><span role="listitem">latency</span><span
+          role="listitem">background</span
+        >
       </div>
     </article>
   </div>
@@ -135,7 +137,7 @@ import Icon from "../Icon.astro";
   .policy-scale {
     grid-column: 1 / -1;
     display: grid;
-    grid-template-columns: repeat(5, auto);
+    grid-template-columns: repeat(6, auto);
     gap: 0.35rem;
     align-self: end;
     margin-top: 2rem;

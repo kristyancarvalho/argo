@@ -39,4 +39,6 @@ Set `NO_COLOR=1` for plain CLI output. `argo watch` redraws only when attached t
 
 ## Collect useful diagnostics
 
-Include the Argo version, Linux distribution, kernel, NetworkManager version, command, expected and actual behavior, and reproducible steps. Redact credentials before sharing logs. Argo itself removes URL user information and query secrets from routine diagnostics, but copied shell history may still contain the original URL.
+Run `argo doctor` for a read-only overview of core download readiness and optional system QoS capabilities. It checks daemon access, SQLite and destination paths, NetworkManager observation, `tc`, nftables, IFB, cgroup v2, helper reachability, the privilege boundary, and RX-shaping prerequisites. An unavailable QoS capability does not make ordinary downloads unavailable.
+
+Use `argo doctor --json` for a versioned machine-readable report. Include the Argo version, Linux distribution, kernel, command, expected and actual behavior, and reproducible steps when reporting a problem. Redact credentials before sharing logs. Argo itself removes URL user information and query secrets from routine diagnostics, but copied shell history may still contain the original URL.

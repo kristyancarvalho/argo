@@ -63,6 +63,14 @@ func TestTcAdaptiveTreeEnforcesArgoCeiling(t *testing.T) {
 	if !strings.Contains(joined, "classid a400:10 htb rate 19000000bit ceil 19000000bit") {
 		t.Fatalf("adaptive tree does not enforce its reported limit: %s", joined)
 	}
+	state.Policy = qos.PolicyBackground
+	backgroundTree, err := tc.GenerateTreeForState(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if backgroundTree.ArgoCeilingBitsPerSecond != 20_000_000 {
+		t.Fatalf("background policy lost its enforced ceiling: %+v", backgroundTree)
+	}
 
 	state.Policy = qos.PolicyThroughput
 	staticTree, err := tc.GenerateTreeForState(state)

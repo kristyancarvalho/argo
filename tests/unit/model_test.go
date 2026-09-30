@@ -2,6 +2,7 @@ package unit_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/kristyancarvalho/argo/internal/model"
@@ -21,9 +22,14 @@ func TestValidDownloadTransitions(t *testing.T) {
 		{model.StatusResolving, model.StatusFailed},
 		{model.StatusResolving, model.StatusCanceled},
 		{model.StatusDownloading, model.StatusPaused},
+		{model.StatusDownloading, model.StatusVerifying},
 		{model.StatusDownloading, model.StatusCompleted},
 		{model.StatusDownloading, model.StatusFailed},
 		{model.StatusDownloading, model.StatusCanceled},
+		{model.StatusVerifying, model.StatusPaused},
+		{model.StatusVerifying, model.StatusCompleted},
+		{model.StatusVerifying, model.StatusFailed},
+		{model.StatusVerifying, model.StatusCanceled},
 		{model.StatusPaused, model.StatusDownloading},
 		{model.StatusPaused, model.StatusCanceled},
 		{model.StatusFailed, model.StatusQueued},
@@ -45,6 +51,7 @@ func TestInvalidDownloadTransitions(t *testing.T) {
 		model.StatusQueued,
 		model.StatusResolving,
 		model.StatusDownloading,
+		model.StatusVerifying,
 		model.StatusPaused,
 		model.StatusCompleted,
 		model.StatusFailed,
@@ -60,9 +67,14 @@ func TestInvalidDownloadTransitions(t *testing.T) {
 		{model.StatusResolving, model.StatusFailed}:      {},
 		{model.StatusResolving, model.StatusCanceled}:    {},
 		{model.StatusDownloading, model.StatusPaused}:    {},
+		{model.StatusDownloading, model.StatusVerifying}: {},
 		{model.StatusDownloading, model.StatusCompleted}: {},
 		{model.StatusDownloading, model.StatusFailed}:    {},
 		{model.StatusDownloading, model.StatusCanceled}:  {},
+		{model.StatusVerifying, model.StatusPaused}:      {},
+		{model.StatusVerifying, model.StatusCompleted}:   {},
+		{model.StatusVerifying, model.StatusFailed}:      {},
+		{model.StatusVerifying, model.StatusCanceled}:    {},
 		{model.StatusPaused, model.StatusDownloading}:    {},
 		{model.StatusPaused, model.StatusCanceled}:       {},
 		{model.StatusFailed, model.StatusQueued}:         {},
@@ -80,6 +92,22 @@ func TestInvalidDownloadTransitions(t *testing.T) {
 			if !errors.As(err, &transitionError) {
 				t.Errorf("transition %s to %s returned %T, expected InvalidTransitionError", from, to, err)
 			}
+		}
+	}
+}
+
+func TestNormalizeChecksum(t *testing.T) {
+	digest := "A3" + strings.Repeat("0f", 31)
+	checksum, err := model.NormalizeChecksum("SHA256:" + digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if checksum != "sha256:"+strings.ToLower(digest) {
+		t.Fatalf("normalized checksum is %q", checksum)
+	}
+	for _, value := range []string{"", "md5:" + strings.Repeat("0", 32), "sha256:abcd", "sha256:" + strings.Repeat("z", 64)} {
+		if _, err := model.NormalizeChecksum(value); err == nil {
+			t.Errorf("checksum %q was accepted", value)
 		}
 	}
 }

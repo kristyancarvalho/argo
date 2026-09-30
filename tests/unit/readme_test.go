@@ -37,7 +37,7 @@ func TestReadmeHasPublicProjectSectionsAndCommands(t *testing.T) {
 		}
 	}
 	for _, command := range []string{
-		"argo add <url>",
+		"argo add [--checksum sha256:<hex>] <url>",
 		"argo list",
 		"argo show <id>",
 		"argo pause <id>",
@@ -46,6 +46,7 @@ func TestReadmeHasPublicProjectSectionsAndCommands(t *testing.T) {
 		"argo remove <id>",
 		"argo clear",
 		"argo retry <id>",
+		"argo verify <id>",
 		"argo priority <id> <level>",
 		"argo watch",
 		"argo status",

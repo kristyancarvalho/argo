@@ -67,6 +67,15 @@ func TestAddDownloadThroughDaemonIPC(t *testing.T) {
 	if !errors.As(err, &remoteError) || remoteError.Code != "invalid_request" {
 		t.Fatalf("invalid URL returned %v, expected invalid_request", err)
 	}
+	_, err = client.AddWithChecksum(
+		context.Background(),
+		httpServer.URL+"/payload.bin",
+		destination,
+		"sha256:invalid",
+	)
+	if !errors.As(err, &remoteError) || remoteError.Code != "invalid_request" {
+		t.Fatalf("invalid checksum returned %v, expected invalid_request", err)
+	}
 
 	added, err := client.Add(
 		context.Background(),

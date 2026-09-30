@@ -13,7 +13,7 @@ import (
 
 const downloadColumns = `id, url, destination, filename, total_size, downloaded_bytes,
     status, priority, created_at, updated_at, started_at, completed_at,
-    etag, last_modified, range_supported, error_message`
+    etag, last_modified, range_supported, checksum, error_message`
 
 type scanner interface {
 	Scan(destinations ...any) error
@@ -27,8 +27,8 @@ func (store *Store) CreateDownload(ctx context.Context, download model.Download)
 	_, err := store.database.ExecContext(ctx, `INSERT INTO downloads (
         id, url, destination, filename, total_size, downloaded_bytes,
         status, priority, created_at, updated_at, started_at, completed_at,
-        etag, last_modified, range_supported, error_message
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        etag, last_modified, range_supported, checksum, error_message
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		download.ID.String(),
 		download.URL,
 		download.Destination,
@@ -44,6 +44,7 @@ func (store *Store) CreateDownload(ctx context.Context, download model.Download)
 		download.ETag,
 		download.LastModified,
 		download.RangeSupported,
+		download.Checksum,
 		download.Error,
 	)
 	if err != nil {
@@ -210,7 +211,7 @@ func (store *Store) RecoverActiveDownloads(ctx context.Context, updatedAt time.T
         status = 'queued',
         updated_at = ?,
         error_message = 'recovered after daemon restart'
-        WHERE status IN ('resolving', 'downloading')`,
+        WHERE status IN ('resolving', 'downloading', 'verifying')`,
 		formatTime(updatedAt),
 	)
 	if err != nil {
@@ -445,6 +446,12 @@ func validateDownload(download model.Download) error {
 		(download.TotalSize >= 0 && download.DownloadedBytes > download.TotalSize) {
 		return InvalidProgressError{Downloaded: download.DownloadedBytes, Total: download.TotalSize}
 	}
+	if download.Checksum != "" {
+		normalized, err := model.NormalizeChecksum(download.Checksum)
+		if err != nil || normalized != download.Checksum {
+			return fmt.Errorf("invalid download checksum")
+		}
+	}
 
 	return nil
 }
@@ -476,6 +483,7 @@ func scanDownload(source scanner) (model.Download, error) {
 		&download.ETag,
 		&download.LastModified,
 		&rangeSupported,
+		&download.Checksum,
 		&download.Error,
 	); err != nil {
 		return model.Download{}, err

@@ -60,4 +60,26 @@ func TestTrafficPolicyMappingRejectsUnavailableInputs(t *testing.T) {
 	if _, err := qos.MapPolicy(qos.PolicyLatency, qos.PolicyEnvironment{ActiveDownloads: 1}); err == nil {
 		t.Fatal("latency policy was accepted")
 	}
+	if _, err := qos.MapPolicy(qos.PolicyBackground, qos.PolicyEnvironment{ActiveDownloads: 1}); err == nil {
+		t.Fatal("background policy was accepted without its adaptive controller")
+	}
+}
+
+func TestAdaptiveTrafficPolicyMapping(t *testing.T) {
+	environment := qos.PolicyEnvironment{
+		Interface: "eth0", LinkRateBitsPerSecond: 100_000_000,
+		Cgroup: qos.CgroupSelector{Path: "argo.service", Level: 1}, ActiveDownloads: 1,
+	}
+	for _, policy := range []qos.Policy{qos.PolicyLatency, qos.PolicyBackground} {
+		state, err := qos.MapAdaptivePolicyFor(policy, environment, 20_000_000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !state.Enabled || state.Policy != policy || state.ArgoRateBitsPerSecond != 20_000_000 {
+			t.Fatalf("unexpected %s state: %+v", policy, state)
+		}
+	}
+	if _, err := qos.MapAdaptivePolicyFor(qos.PolicyBalanced, environment, 20_000_000); err == nil {
+		t.Fatal("static policy was accepted by adaptive mapping")
+	}
 }

@@ -6,11 +6,13 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kristyancarvalho/argo/internal/daemon"
 	"github.com/kristyancarvalho/argo/internal/model"
 	"github.com/kristyancarvalho/argo/internal/network"
 	"github.com/kristyancarvalho/argo/internal/qos"
+	"github.com/kristyancarvalho/argo/internal/telemetry"
 )
 
 func TestQoSFollowsInterfaceTransitionsAndDisconnects(t *testing.T) {
@@ -130,6 +132,53 @@ func TestUnavailableQoSHelperDoesNotStopNetworkObservationOrDownloads(t *testing
 		t.Fatalf("helper failure changed download status to %s", download.Status)
 	}
 	engine.release("unavailable")
+}
+
+func TestUnavailableQoSHelperDoesNotStopBackgroundDownload(t *testing.T) {
+	baseline, err := telemetry.NewBaselineEstimator(telemetry.BaselineOptions{Manual: 20 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	controller, err := qos.NewBackgroundController(20_000_000, 80_000_000, 10*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	background, err := qos.NewLatencyPolicy(baseline, controller)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := openTestStore(t)
+	engine := newControlledDownloadEngine(store, "background-unavailable")
+	observer := newControlledNetworkObserver()
+	backend := &unavailableTrafficBackend{}
+	service, err := daemon.NewServiceWithOptions(context.Background(), store, engine, daemon.ServiceOptions{
+		MaximumConcurrentDownloads: 1,
+		NetworkObserver:            observer,
+		TrafficPolicy:              qos.PolicyBackground,
+		TrafficLinkRate:            100_000_000,
+		TrafficCgroup:              qos.CgroupSelector{Path: "argo.service", Level: 1},
+		TrafficBackend:             backend,
+		BackgroundPolicy:           background,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeSchedulerService(t, service)
+	observer.send(t, network.Snapshot{Connected: true, Interface: "eth0"})
+	identifier := addScheduledDownload(t, service, "background-unavailable")
+	assertStartedDownload(t, engine, identifier)
+	status := adaptiveServiceStatus(t, service)
+	if !strings.Contains(status.Traffic.Error, "helper unavailable") {
+		t.Fatalf("background helper failure is missing from status: %+v", status.Traffic)
+	}
+	download, err := store.Download(context.Background(), identifier)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if download.Status != model.StatusDownloading {
+		t.Fatalf("background helper failure changed download status to %s", download.Status)
+	}
+	engine.release("background-unavailable")
 }
 
 func TestDaemonShutdownRemovesAppliedQoSState(t *testing.T) {

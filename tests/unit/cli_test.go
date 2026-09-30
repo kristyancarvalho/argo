@@ -3,6 +3,7 @@ package unit_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -26,6 +27,10 @@ type unsafeTerminalClient struct {
 const unsafeTerminalName = "safe\x1b[31m\x1b]0;title\a\nFAKE\r\t\u202e.iso"
 
 func (client *unsafeTerminalClient) Add(context.Context, string, string) (ipc.AddResponse, error) {
+	return ipc.AddResponse{ID: "id", Filename: unsafeTerminalName, Status: "queued"}, nil
+}
+
+func (client *unsafeTerminalClient) AddWithChecksum(context.Context, string, string, string) (ipc.AddResponse, error) {
 	return ipc.AddResponse{ID: "id", Filename: unsafeTerminalName, Status: "queued"}, nil
 }
 
@@ -64,6 +69,14 @@ func assertTerminalSafeOutput(t *testing.T, output string) {
 
 func (client *cliClient) Add(_ context.Context, rawURL, _ string) (ipc.AddResponse, error) {
 	client.called = "add:" + rawURL
+	return ipc.AddResponse{ID: "download-id", Filename: "file.bin", Status: "queued"}, nil
+}
+
+func (client *cliClient) AddWithChecksum(_ context.Context, rawURL, _, checksum string) (ipc.AddResponse, error) {
+	client.called = "add:" + rawURL
+	if checksum != "" {
+		client.called += ":" + checksum
+	}
 	return ipc.AddResponse{ID: "download-id", Filename: "file.bin", Status: "queued"}, nil
 }
 
@@ -126,6 +139,11 @@ func (client *cliClient) Retry(_ context.Context, id string) (ipc.AddResponse, e
 	return ipc.AddResponse{ID: "retry-id", Filename: "file.bin", Status: "queued"}, nil
 }
 
+func (client *cliClient) Verify(_ context.Context, id string) (ipc.VerifyResponse, error) {
+	client.called = "verify:" + id
+	return ipc.VerifyResponse{ID: id, Checksum: "sha256:abcd", Matched: true}, nil
+}
+
 func (client *cliClient) Priority(_ context.Context, id, priority string) (ipc.PriorityResponse, error) {
 	client.called = "priority:" + id + ":" + priority
 	return ipc.PriorityResponse{ID: id, Priority: priority}, nil
@@ -179,6 +197,36 @@ func TestCLIStatusShowsNetworkAndProfile(t *testing.T) {
 			t.Fatalf("status output %q does not contain %q", output.String(), value)
 		}
 	}
+}
+
+func TestCLIStatusShowsBackgroundDiagnostics(t *testing.T) {
+	client := &backgroundStatusClient{cliClient: &cliClient{}}
+	var output bytes.Buffer
+	if err := cli.Run(context.Background(), client, &output, []string{"status"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []string{
+		"Traffic policy: background",
+		"Current limit: 50000000 bit/s",
+		"Measured latency: 25ms",
+		"Baseline latency: 20ms",
+		"Controller: stable",
+	} {
+		if !strings.Contains(output.String(), value) {
+			t.Fatalf("status output %q does not contain %q", output.String(), value)
+		}
+	}
+}
+
+type backgroundStatusClient struct {
+	*cliClient
+}
+
+func (client *backgroundStatusClient) Status(ctx context.Context) (ipc.Status, error) {
+	status, err := client.cliClient.Status(ctx)
+	status.Traffic.Policy = "background"
+
+	return status, err
 }
 
 type secretShowClient struct {
@@ -290,6 +338,7 @@ func TestCLICommands(t *testing.T) {
 		expectedOutput string
 	}{
 		{"add", []string{"add", "https://example.test/file.bin"}, "add:https://example.test/file.bin", "Added download-id"},
+		{"add checksum", []string{"add", "--checksum", "sha256:abcd", "https://example.test/file.bin"}, "add:https://example.test/file.bin:sha256:abcd", "Added download-id"},
 		{"list", []string{"list"}, "list", "downloading"},
 		{"show", []string{"show", "download-id"}, "show:download-id", "Status: paused"},
 		{"pause", []string{"pause", "download-id"}, "pause:download-id", "download-id: paused"},
@@ -298,11 +347,13 @@ func TestCLICommands(t *testing.T) {
 		{"remove", []string{"remove", "download-id"}, "remove:download-id", "download-id: removed"},
 		{"clear", []string{"clear"}, "clear", "Removed 2 historical downloads"},
 		{"retry", []string{"retry", "download-id"}, "retry:download-id", "Added retry-id"},
+		{"verify", []string{"verify", "download-id"}, "verify:download-id", "Verified download-id"},
 		{"priority", []string{"priority", "download-id", "high"}, "priority:download-id:high", "download-id: high"},
 		{"status", []string{"status"}, "status", "Daemon: running"},
 		{"profile", []string{"profile", "gaming"}, "profile:gaming", "Active profile: gaming"},
 		{"policy", []string{"policy", "balanced"}, "policy:balanced", "Traffic policy: balanced (active)"},
 		{"policy off", []string{"policy", "off"}, "policy:off", "Traffic policy: off (inactive)"},
+		{"policy background", []string{"policy", "background"}, "policy:background", "Traffic policy: background (active)"},
 	}
 
 	for _, test := range tests {
@@ -322,13 +373,92 @@ func TestCLICommands(t *testing.T) {
 	}
 }
 
+func TestCLIJSONCommandsProduceVersionedPlainDocuments(t *testing.T) {
+	tests := []struct {
+		arguments []string
+		kind      string
+		call      string
+	}{
+		{[]string{"list", "--json"}, "download_list", "list"},
+		{[]string{"show", "download-id", "--json"}, "download", "show:download-id"},
+		{[]string{"status", "--json"}, "daemon_status", "status"},
+	}
+	for _, test := range tests {
+		t.Run(test.kind, func(t *testing.T) {
+			client := &cliClient{}
+			var output bytes.Buffer
+			if err := cli.RunWithOptions(
+				context.Background(), client, &output, test.arguments, cli.Options{Color: true},
+			); err != nil {
+				t.Fatal(err)
+			}
+			if client.called != test.call {
+				t.Fatalf("called %q, expected %q", client.called, test.call)
+			}
+			var document struct {
+				SchemaVersion int             `json:"schema_version"`
+				Kind          string          `json:"kind"`
+				Data          json.RawMessage `json:"data"`
+			}
+			if err := json.Unmarshal(output.Bytes(), &document); err != nil {
+				t.Fatalf("decode JSON output %q: %v", output.String(), err)
+			}
+			if document.SchemaVersion != cli.JSONSchemaVersion || document.Kind != test.kind || len(document.Data) == 0 {
+				t.Fatalf("unexpected JSON document: %+v", document)
+			}
+			if strings.Contains(output.String(), "\x1b[") {
+				t.Fatalf("JSON output contains terminal styling: %q", output.String())
+			}
+		})
+	}
+}
+
+func TestCLIJSONOutputRedactsSecrets(t *testing.T) {
+	client := &secretShowClient{cliClient: &cliClient{}}
+	var output bytes.Buffer
+	if err := cli.Run(context.Background(), client, &output, []string{"show", "secret", "--json"}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(output.String(), "password") || strings.Contains(output.String(), "token=secret") ||
+		!strings.Contains(output.String(), "redacted@example.test") {
+		t.Fatalf("JSON output exposed secrets: %q", output.String())
+	}
+}
+
+func TestCLIStableExitCodes(t *testing.T) {
+	tests := []struct {
+		err  error
+		code int
+	}{
+		{nil, cli.ExitSuccess},
+		{cli.UsageError{Message: "bad usage"}, cli.ExitUsage},
+		{ipc.DaemonUnavailableError{Err: errors.New("missing socket")}, cli.ExitDaemonUnavailable},
+		{ipc.RemoteError{Code: "not_found", Message: "missing"}, cli.ExitItemNotFound},
+		{ipc.RemoteError{Code: "network_failure", Message: "offline"}, cli.ExitNetworkFailure},
+		{ipc.RemoteError{Code: "policy_unavailable", Message: "helper missing"}, cli.ExitPolicyUnavailable},
+		{ipc.RemoteError{Code: "invalid_request", Message: "bad"}, cli.ExitUsage},
+		{errors.New("unexpected"), cli.ExitGeneralFailure},
+	}
+	for _, test := range tests {
+		if code := cli.ExitCode(test.err); code != test.code {
+			t.Errorf("ExitCode(%v) = %d, expected %d", test.err, code, test.code)
+		}
+	}
+}
+
 func TestCLIRejectsInvalidArguments(t *testing.T) {
 	tests := [][]string{
 		nil,
 		{"unknown"},
 		{"add"},
 		{"add", "one", "two"},
+		{"add", "--checksum"},
+		{"add", "--checksum", "one", "--checksum", "two", "url"},
 		{"list", "extra"},
+		{"list", "--json", "--json"},
+		{"show", "--json"},
+		{"show", "--unknown"},
+		{"policy", "off", "--json"},
 		{"show"},
 		{"pause"},
 		{"resume"},
@@ -336,11 +466,15 @@ func TestCLIRejectsInvalidArguments(t *testing.T) {
 		{"remove"},
 		{"clear", "extra"},
 		{"retry"},
+		{"verify"},
+		{"verify", "one", "two"},
 		{"priority"},
 		{"priority", "download-id"},
 		{"priority", "download-id", "high", "extra"},
 		{"watch", "extra"},
 		{"status", "extra"},
+		{"doctor", "extra"},
+		{"doctor", "--unknown"},
 		{"profile"},
 		{"profile", "one", "two"},
 		{"policy"},
@@ -369,7 +503,8 @@ func TestCLIHelpAliases(t *testing.T) {
 			t.Fatalf("%s: %v", command, err)
 		}
 		for _, value := range []string{
-			"Usage:", "add <url>", "Traffic policies:",
+			"Usage:", "add [--checksum sha256:<hex>] <url>", "verify <id>", "doctor [--json]", "Traffic policies:",
+			"background",
 			"Priorities only order queued downloads inside Argo", "privileged argo-qosd helper",
 		} {
 			if !strings.Contains(output.String(), value) {

@@ -125,6 +125,12 @@ policy = "latency"
 latency_target = "12ms"
 min_rate = "15M"
 max_rate = "70M"
+
+[profiles.background]
+policy = "background"
+latency_target = "10ms"
+min_rate = "5M"
+max_rate = "60M"
 `)
 	if err := os.WriteFile(path, content, 0o600); err != nil {
 		t.Fatal(err)
@@ -140,6 +146,14 @@ max_rate = "70M"
 	if profile.Policy != "latency" || profile.LatencyTarget != 12*time.Millisecond ||
 		profile.MinimumRate != 15_000_000 || profile.MaximumRate != 70_000_000 {
 		t.Fatalf("unexpected adaptive profile: %+v", profile)
+	}
+	background, err := configuration.Profile("background")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if background.Policy != "background" || background.LatencyTarget != 10*time.Millisecond ||
+		background.MinimumRate != 5_000_000 || background.MaximumRate != 60_000_000 {
+		t.Fatalf("unexpected background profile: %+v", background)
 	}
 	adaptive, err := configuration.Adaptive()
 	if err != nil {

@@ -90,6 +90,64 @@ func TestLatencyPolicyFallsBackWithoutBaseline(t *testing.T) {
 	engine.release("missing-baseline")
 }
 
+func TestBackgroundPolicyStartsConservativelyYieldsAndRecovers(t *testing.T) {
+	baseline, err := telemetry.NewBaselineEstimator(telemetry.BaselineOptions{Manual: 20 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	controller, err := qos.NewBackgroundController(20_000_000, 80_000_000, 10*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	background, err := qos.NewLatencyPolicy(baseline, controller)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := openTestStore(t)
+	engine := newControlledDownloadEngine(store, "background")
+	networkObserver := newControlledNetworkObserver()
+	telemetryObserver := &controlledTelemetryObserver{updates: make(chan controlledTelemetryUpdate, 8)}
+	backend := &trafficPolicyBackend{}
+	service, err := daemon.NewServiceWithOptions(context.Background(), store, engine, daemon.ServiceOptions{
+		MaximumConcurrentDownloads: 1,
+		NetworkObserver:            networkObserver,
+		TrafficLinkRate:            100_000_000,
+		TrafficCgroup:              qos.CgroupSelector{Path: "argo.service", Level: 1},
+		TrafficBackend:             backend,
+		TelemetryObserver:          telemetryObserver,
+		BackgroundPolicy:           background,
+		TrafficPolicy:              qos.PolicyBackground,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeSchedulerService(t, service)
+	networkObserver.send(t, network.Snapshot{Connected: true, Interface: "eth0"})
+	started := time.Now().UTC()
+	for index := range 2 {
+		telemetryObserver.send(t, telemetry.Snapshot{
+			Latency: 21 * time.Millisecond, LatencyAvailable: true,
+			LatencySampledAt: started.Add(time.Duration(index) * time.Second),
+		})
+	}
+	identifier := addScheduledDownload(t, service, "background")
+	assertStartedDownload(t, engine, identifier)
+	waitForTrafficPolicy(t, backend, qos.PolicyBackground, 20_000_000)
+	started = started.Add(2 * time.Second)
+	for index := range 2 {
+		telemetryObserver.send(t, adaptiveSnapshot(21*time.Millisecond, started.Add(time.Duration(index)*time.Second)))
+	}
+	waitForTrafficPolicy(t, backend, qos.PolicyBackground, 23_000_000)
+	for index := range 2 {
+		telemetryObserver.send(t, adaptiveSnapshot(50*time.Millisecond, started.Add(time.Duration(index+2)*time.Second)))
+	}
+	waitForTrafficPolicy(t, backend, qos.PolicyBackground, 20_000_000)
+	selectTrafficPolicy(t, service, qos.PolicyOff)
+	selectTrafficPolicy(t, service, qos.PolicyBackground)
+	waitForTrafficPolicy(t, backend, qos.PolicyBackground, 20_000_000)
+	engine.release("background")
+}
+
 func newLatencyPolicyService(
 	t *testing.T,
 	baseline *telemetry.BaselineEstimator,

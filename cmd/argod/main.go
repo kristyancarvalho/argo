@@ -62,7 +62,7 @@ func run(arguments []string) (runError error) {
 	if err != nil {
 		return err
 	}
-	latencyPolicy, err := newLatencyPolicy(
+	latencyPolicy, backgroundPolicy, err := newAdaptivePolicies(
 		adaptiveSettings.LatencyTarget,
 		adaptiveSettings.MinimumRate,
 		adaptiveSettings.MaximumRate,
@@ -77,7 +77,7 @@ func run(arguments []string) (runError error) {
 		if err != nil {
 			return err
 		}
-		profileLatencyPolicy, err := newLatencyPolicy(
+		profileLatencyPolicy, profileBackgroundPolicy, err := newAdaptivePolicies(
 			profile.LatencyTarget,
 			profile.MinimumRate,
 			profile.MaximumRate,
@@ -95,6 +95,7 @@ func run(arguments []string) (runError error) {
 			ResumeAfterMetered:         profile.ResumeAfterMetered,
 			Policy:                     profile.Policy,
 			LatencyPolicy:              profileLatencyPolicy,
+			BackgroundPolicy:           profileBackgroundPolicy,
 		}
 	}
 	flags := flag.NewFlagSet("argod", flag.ContinueOnError)
@@ -217,6 +218,7 @@ func run(arguments []string) (runError error) {
 		TrafficBackend:             qosipc.NewClient(qosipc.DefaultSocketPath),
 		TelemetryObserver:          telemetryObserver,
 		LatencyPolicy:              latencyPolicy,
+		BackgroundPolicy:           backgroundPolicy,
 	})
 	if err != nil {
 		return err
@@ -232,14 +234,14 @@ func run(arguments []string) (runError error) {
 	return server.Serve(ctx)
 }
 
-func newLatencyPolicy(
+func newAdaptivePolicies(
 	target time.Duration,
 	minimum uint64,
 	maximum uint64,
 	manualBaseline time.Duration,
-) (*qos.LatencyPolicy, error) {
+) (*qos.LatencyPolicy, *qos.LatencyPolicy, error) {
 	if minimum == 0 && maximum == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	span := maximum - minimum
 	increaseStep := span / 20
@@ -252,7 +254,7 @@ func newLatencyPolicy(
 	}
 	baseline, err := telemetry.NewBaselineEstimator(telemetry.BaselineOptions{Manual: manualBaseline})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	controller, err := qos.NewAdaptiveController(qos.AdaptiveOptions{
 		MinimumRateBitsPerSecond:  minimum,
@@ -264,8 +266,20 @@ func newLatencyPolicy(
 		RequiredSamples:           3,
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	latencyPolicy, err := qos.NewLatencyPolicy(baseline, controller)
+	if err != nil {
+		return nil, nil, err
+	}
+	backgroundController, err := qos.NewBackgroundController(minimum, maximum, target)
+	if err != nil {
+		return nil, nil, err
+	}
+	backgroundPolicy, err := qos.NewLatencyPolicy(baseline, backgroundController)
+	if err != nil {
+		return nil, nil, err
 	}
 
-	return qos.NewLatencyPolicy(baseline, controller)
+	return latencyPolicy, backgroundPolicy, nil
 }

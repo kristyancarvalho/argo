@@ -60,6 +60,10 @@ type CanceledResumeValidator interface {
 	ValidateCanceledResume(context.Context, model.Download) error
 }
 
+type IntegrityVerifier interface {
+	Verify(context.Context, model.Download) (string, error)
+}
+
 type DownloadRateController interface {
 	SetRateLimit(int64) error
 }
@@ -95,6 +99,7 @@ type ServiceOptions struct {
 	TrafficBackend             qos.Backend
 	TelemetryObserver          TelemetryObserver
 	LatencyPolicy              *qos.LatencyPolicy
+	BackgroundPolicy           *qos.LatencyPolicy
 }
 
 type Profile struct {
@@ -106,6 +111,7 @@ type Profile struct {
 	ResumeAfterMetered         bool
 	Policy                     string
 	LatencyPolicy              *qos.LatencyPolicy
+	BackgroundPolicy           *qos.LatencyPolicy
 }
 
 type priorityUpdate struct {
@@ -165,6 +171,7 @@ type Service struct {
 	trafficError       string
 	telemetryObserver  TelemetryObserver
 	latencyPolicy      *qos.LatencyPolicy
+	backgroundPolicy   *qos.LatencyPolicy
 	partialCleaner     PartialCleaner
 }
 
@@ -248,6 +255,7 @@ func NewServiceWithOptions(
 		options.ResumeAfterMetered = profile.ResumeAfterMetered
 		options.TrafficPolicy = qos.Policy(profile.Policy)
 		options.LatencyPolicy = profile.LatencyPolicy
+		options.BackgroundPolicy = profile.BackgroundPolicy
 	}
 	if len(profiles) > 0 && (!supportsProfiles || !controlsRate) {
 		return nil, fmt.Errorf("service dependencies cannot apply profiles")
@@ -316,6 +324,7 @@ func NewServiceWithOptions(
 		trafficCgroup:      options.TrafficCgroup,
 		telemetryObserver:  options.TelemetryObserver,
 		latencyPolicy:      options.LatencyPolicy,
+		backgroundPolicy:   options.BackgroundPolicy,
 	}
 	service.partialCleaner, _ = engine.(PartialCleaner)
 	if service.networkObserver == nil {
@@ -347,7 +356,7 @@ func (service *Service) Handle(ctx context.Context, request ipc.Request) (any, e
 			return nil, service.ctx.Err()
 		}
 	case ipc.OperationStatus, ipc.OperationAdd, ipc.OperationPriority, ipc.OperationList,
-		ipc.OperationShow, ipc.OperationProfile, ipc.OperationPolicy, ipc.OperationRetry:
+		ipc.OperationShow, ipc.OperationProfile, ipc.OperationPolicy, ipc.OperationRetry, ipc.OperationVerify:
 	}
 	switch request.Operation {
 	case ipc.OperationStatus:
@@ -376,6 +385,8 @@ func (service *Service) Handle(ctx context.Context, request ipc.Request) (any, e
 		return service.clearHistory(ctx)
 	case ipc.OperationRetry:
 		return service.retry(ctx, request.Payload)
+	case ipc.OperationVerify:
+		return service.verify(ctx, request.Payload)
 	default:
 		return nil, ipc.UnsupportedOperationError{Operation: request.Operation}
 	}
@@ -403,6 +414,7 @@ func (service *Service) statusResponse() ipc.Status {
 	status.ActiveProfile = service.activeProfile
 	policy := service.trafficPolicy
 	latencyPolicy := service.latencyPolicy
+	backgroundPolicy := service.backgroundPolicy
 	service.profileMutex.RUnlock()
 	status.Traffic.Policy = string(policy)
 	service.trafficErrorMutex.RLock()
@@ -415,8 +427,12 @@ func (service *Service) statusResponse() ipc.Status {
 			status.Traffic.CurrentRateBitsPerSecond = current.ArgoRateBitsPerSecond
 		}
 	}
-	if policy == qos.PolicyLatency && latencyPolicy != nil {
-		diagnostics := latencyPolicy.Diagnostics(time.Now().UTC())
+	adaptivePolicy := latencyPolicy
+	if policy == qos.PolicyBackground {
+		adaptivePolicy = backgroundPolicy
+	}
+	if (policy == qos.PolicyLatency || policy == qos.PolicyBackground) && adaptivePolicy != nil {
+		diagnostics := adaptivePolicy.Diagnostics(time.Now().UTC())
 		status.Traffic.CurrentRateBitsPerSecond = diagnostics.State.RateBitsPerSecond
 		status.Traffic.MeasuredLatency = diagnostics.MeasuredLatency
 		status.Traffic.LatencyAvailable = diagnostics.LatencyAvailable
@@ -506,7 +522,7 @@ func (service *Service) pause(ctx context.Context, payload json.RawMessage) (ipc
 		return actionResponse(download.ID, model.StatusPaused), nil
 	}
 	switch download.Status {
-	case model.StatusQueued, model.StatusResolving, model.StatusDownloading:
+	case model.StatusQueued, model.StatusResolving, model.StatusDownloading, model.StatusVerifying:
 	case model.StatusPaused:
 		return actionResponse(download.ID, model.StatusPaused), nil
 	case model.StatusCompleted, model.StatusFailed, model.StatusCanceled:
@@ -570,7 +586,7 @@ func (service *Service) resume(ctx context.Context, payload json.RawMessage) (ip
 			}
 		}
 		status = model.StatusQueued
-	case model.StatusQueued, model.StatusResolving, model.StatusDownloading:
+	case model.StatusQueued, model.StatusResolving, model.StatusDownloading, model.StatusVerifying:
 		return actionResponse(identifier, download.Status), nil
 	case model.StatusCompleted:
 		return ipc.DownloadActionResponse{}, InvalidDownloadActionError{
@@ -672,6 +688,7 @@ func (service *Service) cancelDownload(
 	case model.StatusQueued,
 		model.StatusResolving,
 		model.StatusDownloading,
+		model.StatusVerifying,
 		model.StatusPaused,
 		model.StatusFailed:
 	case model.StatusCompleted:
@@ -734,7 +751,7 @@ func (service *Service) removeDownload(ctx context.Context, identifier model.Dow
 		if err := service.partialCleaner.RemovePartial(identifier); err != nil {
 			return ipc.DownloadActionResponse{}, err
 		}
-	case model.StatusQueued, model.StatusResolving, model.StatusDownloading, model.StatusPaused:
+	case model.StatusQueued, model.StatusResolving, model.StatusDownloading, model.StatusVerifying, model.StatusPaused:
 		return ipc.DownloadActionResponse{}, InvalidDownloadActionError{
 			ID: identifier.String(), Action: "remove", Status: download.Status,
 		}
@@ -772,19 +789,46 @@ func (service *Service) retry(ctx context.Context, payload json.RawMessage) (ipc
 	}
 	switch original.Status {
 	case model.StatusCompleted, model.StatusFailed, model.StatusCanceled:
-	case model.StatusQueued, model.StatusResolving, model.StatusDownloading, model.StatusPaused:
+	case model.StatusQueued, model.StatusResolving, model.StatusDownloading, model.StatusVerifying, model.StatusPaused:
 		return ipc.AddResponse{}, InvalidDownloadActionError{
 			ID: original.ID.String(), Action: "retry", Status: original.Status,
 		}
 	}
 	download, err := newDownload(ipc.AddRequest{
-		URL: original.URL, Destination: original.Destination,
+		URL: original.URL, Destination: original.Destination, Checksum: original.Checksum,
 	}, original.Priority, service.defaultDestination)
 	if err != nil {
 		return ipc.AddResponse{}, err
 	}
 
 	return service.queueDownload(ctx, download)
+}
+
+func (service *Service) verify(ctx context.Context, payload json.RawMessage) (ipc.VerifyResponse, error) {
+	identifier, download, err := service.actionDownload(ctx, payload)
+	if err != nil {
+		return ipc.VerifyResponse{}, err
+	}
+	if download.Status != model.StatusCompleted {
+		return ipc.VerifyResponse{}, InvalidDownloadActionError{
+			ID: identifier.String(), Action: "verify", Status: download.Status,
+		}
+	}
+	if download.Checksum == "" {
+		return ipc.VerifyResponse{}, InvalidDownloadActionError{
+			ID: identifier.String(), Action: "verify", Reason: "download has no checksum metadata",
+		}
+	}
+	verifier, ok := service.engine.(IntegrityVerifier)
+	if !ok {
+		return ipc.VerifyResponse{}, fmt.Errorf("download engine cannot verify integrity")
+	}
+	actual, err := verifier.Verify(ctx, download)
+	if err != nil {
+		return ipc.VerifyResponse{}, err
+	}
+
+	return ipc.VerifyResponse{ID: identifier.String(), Checksum: actual, Matched: true}, nil
 }
 
 func (service *Service) list(ctx context.Context, payload json.RawMessage) (ipc.ListResponse, error) {
@@ -965,6 +1009,9 @@ func (service *Service) setProfile(ctx context.Context, payload json.RawMessage)
 	if err := service.rateController.SetRateLimit(profile.BytesPerSecond); err != nil {
 		return ipc.ProfileResponse{}, err
 	}
+	if qos.Policy(profile.Policy) == qos.PolicyBackground && profile.BackgroundPolicy != nil {
+		profile.BackgroundPolicy.Reset()
+	}
 	service.profileMutex.Lock()
 	service.activeProfile = profile.Name
 	service.defaultPriority = profile.DefaultPriority
@@ -972,6 +1019,7 @@ func (service *Service) setProfile(ctx context.Context, payload json.RawMessage)
 	service.resumeAfterMetered = profile.ResumeAfterMetered
 	service.trafficPolicy = qos.Policy(profile.Policy)
 	service.latencyPolicy = profile.LatencyPolicy
+	service.backgroundPolicy = profile.BackgroundPolicy
 	service.profileMutex.Unlock()
 	if err := service.updateSchedulerLimit(ctx, profile.MaximumConcurrentDownloads); err != nil {
 		return ipc.ProfileResponse{}, err
@@ -1128,6 +1176,7 @@ func downloadResponse(download model.Download) ipc.Download {
 		Priority:        string(download.Priority),
 		CreatedAt:       download.CreatedAt,
 		UpdatedAt:       download.UpdatedAt,
+		Checksum:        download.Checksum,
 		Error:           diagnostic.Display(diagnostic.Text(download.Error)),
 	}
 }
@@ -1163,6 +1212,13 @@ func newDownload(request ipc.AddRequest, priority model.Priority, defaultDestina
 	if err != nil {
 		return model.Download{}, InvalidAddRequestError{Reason: "destination cannot be resolved"}
 	}
+	checksum := ""
+	if request.Checksum != "" {
+		checksum, err = model.NormalizeChecksum(request.Checksum)
+		if err != nil {
+			return model.Download{}, InvalidAddRequestError{Reason: err.Error()}
+		}
+	}
 
 	filename := path.Base(parsedURL.Path)
 	filename, err = url.PathUnescape(filename)
@@ -1195,5 +1251,6 @@ func newDownload(request ipc.AddRequest, priority model.Priority, defaultDestina
 		Priority:        priority,
 		CreatedAt:       now,
 		UpdatedAt:       now,
+		Checksum:        checksum,
 	}, nil
 }

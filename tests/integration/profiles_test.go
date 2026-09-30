@@ -64,6 +64,7 @@ func TestAdaptiveProfileSwitchReconcilesActiveDownload(t *testing.T) {
 	backend := &trafficPolicyBackend{}
 	low := newProfileLatencyPolicy(t, 10_000_000, 40_000_000)
 	high := newProfileLatencyPolicy(t, 20_000_000, 70_000_000)
+	background := newProfileBackgroundPolicy(t, 5_000_000, 60_000_000)
 	service, err := daemon.NewServiceWithOptions(context.Background(), store, engine, daemon.ServiceOptions{
 		MaximumConcurrentDownloads: 1,
 		NetworkObserver:            observer,
@@ -78,6 +79,10 @@ func TestAdaptiveProfileSwitchReconcilesActiveDownload(t *testing.T) {
 			"fast": {
 				Name: "fast", BytesPerSecond: 1, DefaultPriority: model.PriorityNormal,
 				MaximumConcurrentDownloads: 1, Policy: "latency", LatencyPolicy: high,
+			},
+			"background": {
+				Name: "background", BytesPerSecond: 1, DefaultPriority: model.PriorityLow,
+				MaximumConcurrentDownloads: 1, Policy: "background", BackgroundPolicy: background,
 			},
 		},
 	})
@@ -95,7 +100,27 @@ func TestAdaptiveProfileSwitchReconcilesActiveDownload(t *testing.T) {
 	waitForTrafficPolicy(t, backend, qos.PolicyLatency, 40_000_000)
 	switchProfile(t, service, "fast")
 	waitForTrafficPolicy(t, backend, qos.PolicyLatency, 70_000_000)
+	switchProfile(t, service, "background")
+	waitForTrafficPolicy(t, backend, qos.PolicyBackground, 5_000_000)
 	engine.release("adaptive-profile")
+}
+
+func newProfileBackgroundPolicy(t *testing.T, minimum, maximum uint64) *qos.LatencyPolicy {
+	t.Helper()
+	baseline, err := telemetry.NewBaselineEstimator(telemetry.BaselineOptions{Manual: 20 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	controller, err := qos.NewBackgroundController(minimum, maximum, 10*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, err := qos.NewLatencyPolicy(baseline, controller)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return policy
 }
 
 func TestProfileSwitchReportsQoSFailure(t *testing.T) {

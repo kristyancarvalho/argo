@@ -53,15 +53,16 @@ Large downloads should not require an interactive client to remain open, overwri
 
 - Persistent daemon-backed HTTP and HTTPS downloads
 - Redirects, validators, byte ranges, bounded chunking, pause, resume, and crash recovery
+- Optional SHA-256 validation before publication, plus verification of completed files
 - Historical record management with remove, clear, retry, and repeated-URL support
 - Collision-safe final filenames without silently overwriting completed files
 - High, normal, and low scheduling priority with configurable concurrency
 - XDG-aware configuration, database, runtime socket, and partial-file storage
 - Configurable profiles, rate limits, metered-network behavior, and NetworkManager observation
-- CLI status, non-scrolling live watch mode, human-readable output, and terminal-aware color
+- CLI status and capability diagnostics, non-scrolling live watch mode, human-readable output, and terminal-aware color
 - Responsive TUI with download details, actions, confirmations, help, and narrow-terminal handling
 - Optional cgroup-based traffic classification and Linux RX shaping through nftables, conntrack, `tc`, and IFB
-- Adaptive latency policy using smoothed telemetry and bounded rate changes
+- Adaptive latency and background policies using smoothed telemetry and bounded rate changes
 - Unprivileged main daemon with a separate `CAP_NET_ADMIN` QoS helper
 
 ### Current boundaries
@@ -161,6 +162,7 @@ Then use the client from another terminal:
 
 ```sh
 ./bin/argo add https://example.com/archive.iso
+./bin/argo add --checksum sha256:<64-hex-digits> https://example.com/archive.iso
 ./bin/argo list
 ./bin/argo watch
 ```
@@ -177,24 +179,38 @@ Downloads continue after the client exits. Unless configured otherwise, the comp
 
 | Command | Purpose |
 | --- | --- |
-| `argo add <url>` | Add a new HTTP or HTTPS transfer |
-| `argo list` | List downloads and history |
-| `argo show <id>` | Show complete transfer details |
+| `argo add [--checksum sha256:<hex>] <url>` | Add a new HTTP or HTTPS transfer with optional integrity validation |
+| `argo list [--json]` | List downloads and history, optionally as versioned JSON |
+| `argo show <id> [--json]` | Show complete transfer details, optionally as versioned JSON |
 | `argo pause <id>` | Pause queued or active work |
 | `argo resume <id>` | Continue valid partial state with the same ID |
 | `argo cancel <id>` | Cancel a transfer while preserving resumable data when valid |
 | `argo remove <id>` | Remove one completed, failed, or canceled record and its Argo-owned partial data |
 | `argo clear` | Remove completed, failed, and canceled history without stopping active or resumable work |
 | `argo retry <id>` | Create a new transfer ID from completed, failed, or canceled history |
+| `argo verify <id>` | Recheck a completed file against its stored checksum |
 | `argo priority <id> <level>` | Set queued priority to `low`, `normal`, or `high` |
 | `argo watch` | Redraw live progress in a TTY, or print one snapshot when piped |
-| `argo status` | Show daemon, network, profile, and QoS state |
-| `argo policy <name>` | Select `off`, `focus`, `balanced`, `throughput`, or `latency` |
+| `argo status [--json]` | Show daemon, network, profile, and QoS state, optionally as versioned JSON |
+| `argo doctor [--json]` | Diagnose core download readiness and optional Linux QoS capabilities without changing system state |
+| `argo policy <name>` | Select `off`, `focus`, `balanced`, `throughput`, `latency`, or `background` |
 | `argo profile <name>` | Activate a configured profile |
 | `argo tui` | Open the interactive terminal interface |
 | `argo help` | Show built-in command help |
 
 `argo --help` and `argo -h` are also supported. Set `NO_COLOR=1` to disable color in terminal output.
+
+Machine-readable output uses an envelope containing `schema_version`, `kind`, and `data`. Schema version `1` is available for `list`, `show`, `status`, and `doctor`; it never includes ANSI styling and redacts credentials and query values from source URLs and diagnostics.
+
+| Exit code | Meaning |
+| ---: | --- |
+| `0` | Success |
+| `1` | General failure |
+| `2` | Usage or invalid request |
+| `3` | Daemon unavailable |
+| `4` | Download not found |
+| `5` | Network failure |
+| `6` | Traffic policy unavailable |
 
 ## Configuration
 
@@ -260,8 +276,11 @@ Traffic policy affects active download traffic relative to the default system cl
 | `balanced` | Split guaranteed capacity equally |
 | `throughput` | Reserve 80% of guaranteed capacity for Argo |
 | `latency` | Adjust Argo's limit from measured latency within configured bounds |
+| `background` | Start at the configured minimum, reclaim idle capacity gradually, and yield faster when latency exceeds its target |
 
 Unused capacity can be borrowed by either class. Policies are applied only while downloads are active and require a nonzero `qos.link_rate`, a connected interface, and `argo-qosd`. Argo classifies `argod` through its cgroup, carries that identity through conntrack, and redirects received traffic to an Argo-owned IFB before shaping it.
+
+`latency` begins at the configured maximum and adjusts around the latency target. `background` begins at the configured minimum on each activation, increases after consecutive healthy samples, and decreases more aggressively after consecutive target violations or missing telemetry. A remote path whose own baseline changes can remain above the target even after Argo reaches its minimum; status reports the measured state rather than claiming that every external delay is controllable.
 
 Use `argo status` for the current policy and any helper error. On a configured host, inspect live kernel state with `sudo tc -s class show dev <interface>` and `sudo nft list table inet argo` while a transfer is active.
 
@@ -306,11 +325,14 @@ go test ./tests/integration -run '^$' -bench BenchmarkDownloadCheckpointThroughp
 
 The benchmark reports one- and four-chunk transfers, including durable finalization. Keep the temporary filesystem and machine load consistent when comparing results; tmpfs is not representative of persistent storage. Progress is checkpointed frequently during startup, then after roughly 1 MiB per stream/chunk or one second of incoming progress. Checkpoints sync partial data before persisting offsets. Clean pause and worker termination flush remaining progress; abrupt termination may replay the last uncheckpointed bytes.
 
+The opt-in [HTTP transport benchmark](benchmarks/http-transport/README.md) compares verified HTTP/1.1 and HTTP/2 transfers under isolated latency, loss, and per-connection throttling without changing the host network.
+
 ## Repository structure
 
 | Path | Purpose |
 | --- | --- |
 | `assets/branding/` | Logo sources, exports, banners, widgets, and previews |
+| `benchmarks/` | Reproducible benchmark methods, raw results, and decisions |
 | `cmd/` | Entry points for `argo`, `argod`, and `argo-qosd` |
 | `internal/` | Private application packages and subsystem implementations |
 | `packaging/systemd/` | User daemon and privileged helper service definitions |

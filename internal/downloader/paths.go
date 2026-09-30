@@ -47,6 +47,7 @@ type finalizationRecord struct {
 	Candidate string `json:"candidate"`
 	Staging   string `json:"staging"`
 	Size      int64  `json:"size"`
+	Checksum  string `json:"checksum,omitempty"`
 	Ready     bool   `json:"ready"`
 }
 
@@ -251,7 +252,9 @@ func (engine *Engine) newFinalizationRecord(download model.Download, initial str
 		candidate := collisionPath(initial, index)
 		_, err := os.Lstat(candidate)
 		if errors.Is(err, os.ErrNotExist) {
-			return finalizationRecord{Candidate: filepath.Base(candidate), Staging: staging, Size: size}, nil
+			return finalizationRecord{
+				Candidate: filepath.Base(candidate), Staging: staging, Size: size, Checksum: download.Checksum,
+			}, nil
 		}
 		if err != nil {
 			return finalizationRecord{}, fmt.Errorf("inspect final destination: %w", err)
@@ -397,11 +400,11 @@ func (engine *Engine) recoverPendingFinalization(ctx context.Context, download m
 		if err := engine.store.UpdateDownloadStatus(ctx, download.ID, model.StatusQueued, engine.now(), ""); err != nil {
 			return false, err
 		}
-	case model.StatusQueued, model.StatusResolving, model.StatusDownloading:
+	case model.StatusQueued, model.StatusResolving, model.StatusDownloading, model.StatusVerifying:
 	case model.StatusPaused, model.StatusCanceled:
 		return false, nil
 	}
-	if download.Status != model.StatusDownloading {
+	if download.Status != model.StatusDownloading && download.Status != model.StatusVerifying {
 		if err := engine.store.UpdateDownloadStatus(ctx, download.ID, model.StatusDownloading, engine.now(), ""); err != nil {
 			return false, err
 		}
@@ -409,6 +412,11 @@ func (engine *Engine) recoverPendingFinalization(ctx context.Context, download m
 	finalPath, err := engine.recoverFinalization(download, record)
 	if err != nil {
 		return false, err
+	}
+	if download.Checksum != "" {
+		if _, err := verifyPath(ctx, finalPath, download.Checksum); err != nil {
+			return false, err
+		}
 	}
 	current, exists, err := engine.readFinalizationRecord(download.ID)
 	if err != nil {
@@ -476,6 +484,9 @@ func validateFinalizationRecord(download model.Download, record finalizationReco
 	}
 	if record.Size < 0 {
 		return fmt.Errorf("invalid finalization size for download %s", download.ID)
+	}
+	if record.Checksum != download.Checksum {
+		return fmt.Errorf("finalization checksum does not match download %s", download.ID)
 	}
 
 	return nil

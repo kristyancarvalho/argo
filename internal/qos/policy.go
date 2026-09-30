@@ -15,6 +15,7 @@ const (
 	PolicyThroughput Policy = "throughput"
 	PolicyLatency    Policy = "latency"
 	PolicyFocus      Policy = "focus"
+	PolicyBackground Policy = "background"
 )
 
 type Intent struct {
@@ -49,7 +50,7 @@ func ParsePolicy(value string) (Policy, error) {
 
 func (policy Policy) Validate() error {
 	switch policy {
-	case PolicyOff, PolicyBalanced, PolicyThroughput, PolicyLatency, PolicyFocus:
+	case PolicyOff, PolicyBalanced, PolicyThroughput, PolicyLatency, PolicyFocus, PolicyBackground:
 		return nil
 	default:
 		return fmt.Errorf("invalid QoS policy %q", policy)
@@ -126,8 +127,8 @@ func MapPolicy(policy Policy, environment PolicyEnvironment) (DesiredState, erro
 		percentage = 80
 	case PolicyFocus:
 		percentage = 20
-	case PolicyLatency:
-		return DesiredState{}, fmt.Errorf("latency policy requires the adaptive controller")
+	case PolicyLatency, PolicyBackground:
+		return DesiredState{}, fmt.Errorf("%s policy requires the adaptive controller", policy)
 	case PolicyOff:
 		return DesiredState{Policy: PolicyOff}, nil
 	}

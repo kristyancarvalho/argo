@@ -77,7 +77,7 @@ func (engine *Engine) ValidateCanceledResume(ctx context.Context, download model
 	if info.Size() < download.DownloadedBytes {
 		return ResumeUnavailableError{ID: download.ID.String(), Reason: "partial data is incomplete or invalid"}
 	}
-	metadata, err := NewInspector(engine.httpClient).Inspect(validationContext, download.URL)
+	metadata, err := newInspector(engine.httpClient, engine.retry).Inspect(validationContext, download.URL)
 	if err != nil {
 		return ResumeUnavailableError{ID: download.ID.String(), Reason: diagnostic.Text(err.Error())}
 	}

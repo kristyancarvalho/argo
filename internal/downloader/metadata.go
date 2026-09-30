@@ -79,19 +79,27 @@ func displayValidator(value string) string {
 
 type Inspector struct {
 	httpClient *http.Client
+	retry      retryPolicy
 }
 
 func NewInspector(httpClient *http.Client) *Inspector {
-	return &Inspector{httpClient: httpClient}
+	retry, _ := newRetryPolicy(RetryOptions{})
+	return newInspector(httpClient, retry)
+}
+
+func newInspector(httpClient *http.Client, retry retryPolicy) *Inspector {
+	return &Inspector{httpClient: httpClient, retry: retry}
 }
 
 func (inspector *Inspector) Inspect(ctx context.Context, rawURL string) (RemoteMetadata, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
-	if err != nil {
-		return RemoteMetadata{}, fmt.Errorf("create metadata request: %w", err)
-	}
-	request.Header.Set("Range", "bytes=0-0")
-	response, err := inspector.httpClient.Do(request)
+	response, err := inspector.retry.do(ctx, func() (*http.Request, error) {
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("create metadata request: %w", err)
+		}
+		request.Header.Set("Range", "bytes=0-0")
+		return request, nil
+	}, inspector.httpClient)
 	if err != nil {
 		return RemoteMetadata{}, fmt.Errorf("request remote metadata: %w", err)
 	}

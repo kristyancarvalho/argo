@@ -57,7 +57,7 @@ func (observer *Observer) sample(ctx context.Context, emit func(Snapshot) error)
 	observations := make([]TransferObservation, 0, len(downloads))
 	for _, download := range downloads {
 		switch download.Status {
-		case model.StatusQueued, model.StatusResolving, model.StatusDownloading:
+		case model.StatusQueued, model.StatusResolving, model.StatusDownloading, model.StatusVerifying:
 			observations = append(observations, TransferObservation{
 				ID:              download.ID,
 				DownloadedBytes: download.DownloadedBytes,
