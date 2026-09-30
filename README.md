@@ -325,11 +325,14 @@ go test ./tests/integration -run '^$' -bench BenchmarkDownloadCheckpointThroughp
 
 The benchmark reports one- and four-chunk transfers, including durable finalization. Keep the temporary filesystem and machine load consistent when comparing results; tmpfs is not representative of persistent storage. Progress is checkpointed frequently during startup, then after roughly 1 MiB per stream/chunk or one second of incoming progress. Checkpoints sync partial data before persisting offsets. Clean pause and worker termination flush remaining progress; abrupt termination may replay the last uncheckpointed bytes.
 
+The opt-in [HTTP transport benchmark](benchmarks/http-transport/README.md) compares verified HTTP/1.1 and HTTP/2 transfers under isolated latency, loss, and per-connection throttling without changing the host network.
+
 ## Repository structure
 
 | Path | Purpose |
 | --- | --- |
 | `assets/branding/` | Logo sources, exports, banners, widgets, and previews |
+| `benchmarks/` | Reproducible benchmark methods, raw results, and decisions |
 | `cmd/` | Entry points for `argo`, `argod`, and `argo-qosd` |
 | `internal/` | Private application packages and subsystem implementations |
 | `packaging/systemd/` | User daemon and privileged helper service definitions |
